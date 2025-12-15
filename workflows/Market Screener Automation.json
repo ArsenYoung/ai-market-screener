@@ -1,0 +1,914 @@
+{
+  "updatedAt": "2025-12-07T08:32:16.000Z",
+  "createdAt": "2025-12-05T07:32:50.855Z",
+  "id": "xyCtaPpmNEHHxitt",
+  "name": "Market Screener Automation",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -96,
+        208
+      ],
+      "id": "7f7e64e9-2a21-4f0d-bc87-e608e8f0d9aa",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=30",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        240,
+        -32
+      ],
+      "id": "27604c80-9ddb-4207-a881-f4f7fd2d6e1f",
+      "name": "Get BTC OHLC",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items.map(i => i.json);\n\nconst candles = raw.map(row => ({\n  timestamp: row[0],\n  open: row[1],\n  high: row[2],\n  low: row[3],\n  close: row[4],\n}));\n\nreturn [{\n  json: {\n    symbol: \"BTC\",\n    candles\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -32
+      ],
+      "id": "c7ba20a0-7dc4-44c6-b66a-84a40d4d93a9",
+      "name": "Normalize BTC Data"
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?interval=1d&range=1mo",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        240,
+        128
+      ],
+      "id": "d0bab0c9-f56f-48c4-a13c-51f779409da7",
+      "name": "Get GOLD OHLC",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json.chart.result[0];\n\nconst timestamps = data.timestamp;\nconst quote = data.indicators.quote[0];\n\nconst candles = timestamps.map((t, i) => ({\n  timestamp: t * 1000, // convert seconds → ms\n  open: quote.open[i],\n  high: quote.high[i],\n  low: quote.low[i],\n  close: quote.close[i],\n}));\n\nreturn [{\n  json: {\n    symbol: \"GOLD\",\n    candles\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        128
+      ],
+      "id": "df6e56d7-6286-4242-80f7-251da2f10d3a",
+      "name": "Normalize GOLD Data"
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?interval=1d&range=1mo",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        240,
+        288
+      ],
+      "id": "0db58ddd-eee6-4e0d-9c3e-6c6e137c4dc5",
+      "name": "Get NASDAQ OHLC",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json.chart.result[0];\n\nconst timestamps = data.timestamp;\nconst quote = data.indicators.quote[0];\n\nconst candles = timestamps.map((t, i) => ({\n  timestamp: t * 1000,\n  open: quote.open[i],\n  high: quote.high[i],\n  low: quote.low[i],\n  close: quote.close[i],\n}));\n\nreturn [{\n  json: {\n    symbol: \"NASDAQ\",\n    candles\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        288
+      ],
+      "id": "ac6f22b8-6f3e-4e47-8575-877d2ba31968",
+      "name": "Normalize NASDAQ Data"
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1mo",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        240,
+        448
+      ],
+      "id": "62843e94-cc42-4161-987e-78d1b1dfd5b7",
+      "name": "Get AAPL OHLC",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json.chart.result[0];\n\nconst timestamps = data.timestamp;\nconst quote = data.indicators.quote[0];\n\nconst candles = timestamps.map((t, i) => ({\n  timestamp: t * 1000,\n  open: quote.open[i],\n  high: quote.high[i],\n  low: quote.low[i],\n  close: quote.close[i],\n}));\n\nreturn [{\n  json: {\n    symbol: \"AAPL\",\n    candles\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        448
+      ],
+      "id": "e5d1014d-afce-4d8f-a2a4-6e4320ce22b7",
+      "name": "Normalize AAPL Data"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        768,
+        176
+      ],
+      "id": "04c680dc-487f-483b-8fc1-910e14cf4151",
+      "name": "Merge All Markets"
+    },
+    {
+      "parameters": {
+        "jsCode": "const markets = items.map(i => i.json);\n\nconst output = [];\n\nfor (const market of markets) {\n  const { symbol, candles } = market;\n\n  // Highs sorted desc\n  const highs = candles\n    .map(c => c.high)\n    .filter(n => n != null)\n    .sort((a, b) => b - a);\n\n  // Lows sorted ascending\n  const lows = candles\n    .map(c => c.low)\n    .filter(n => n != null)\n    .sort((a, b) => a - b);\n\n  output.push({\n    symbol,\n    primaryHigh: highs[0],\n    secondaryHigh: highs[1],\n    primaryLow: lows[0],\n    secondaryLow: lows[1],\n  });\n}\n\nreturn output.map(o => ({ json: o }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        208
+      ],
+      "id": "7fda032c-1f13-4a94-a9ca-56830e968659",
+      "name": "Calculate Levels"
+    },
+    {
+      "parameters": {
+        "jsCode": "const itemsOut = [];\n\nfor (const item of items) {\n  const m = item.json;\n\n  // Простая логика: если low сильно выше secondaryHigh → бычий рынок\n  let signal = \"neutral\";\n\n  if (m.primaryLow > m.secondaryHigh) {\n    signal = \"bullish\";\n  } else if (m.primaryHigh < m.secondaryLow) {\n    signal = \"bearish\";\n  }\n\n  itemsOut.push({\n    json: {\n      ...m,\n      signal,\n      timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn itemsOut;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        112
+      ],
+      "id": "347c75b9-e6c3-4838-901a-8d96224f52a7",
+      "name": "Screen Markets"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\n\nfor (const item of items) {\n  const m = item.json;\n\n  out.push({\n    json: {\n      timestamp: m.timestamp,\n      symbol: m.symbol,\n      primaryHigh: m.primaryHigh,\n      secondaryHigh: m.secondaryHigh,\n      primaryLow: m.primaryLow,\n      secondaryLow: m.secondaryLow,\n      signal: m.signal\n    }\n  });\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        112
+      ],
+      "id": "1eca68a0-e3b6-4c88-9fd4-8c896ff704fc",
+      "name": "Prepare Markets Row"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU",
+          "mode": "list",
+          "cachedResultName": "Market Screening Automation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Markets",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "symbol",
+              "displayName": "symbol",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "primaryHigh",
+              "displayName": "primaryHigh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "secondaryHigh",
+              "displayName": "secondaryHigh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "primaryLow",
+              "displayName": "primaryLow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "secondaryLow",
+              "displayName": "secondaryLow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "signal",
+              "displayName": "signal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1520,
+        112
+      ],
+      "id": "c62cdec7-a581-4580-80d9-f5f80d77c1e8",
+      "name": "Append row in Markets",
+      "credentials": {
+        "googleApi": {
+          "id": "cFg23FT1KZiF6dC0",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "168487641",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1984,
+        448
+      ],
+      "id": "7988ad1e-3291-492a-96da-f13d36463b1b",
+      "name": "Send a text message",
+      "webhookId": "0e68bd46-9a17-4cb9-9b37-2881650d0981",
+      "credentials": {
+        "telegramApi": {
+          "id": "tlNJ5UcGQyktezRQ",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        656
+      ],
+      "id": "1d6dcc73-4a26-4bd0-8e7a-0acd7f95833f",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берём все входящие items\nconst items = $input.all();\n\n// Линк на таблицу\nconst sheetUrl = \"https://docs.google.com/spreadsheets/d/1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU/edit?gid=271970722#gid=271970722\";\n\nreturn items.map(item => {\n  const s = item.json;\n\n  // Risk color tags\n  const riskColor =\n    s.risk === \"high\" ? \"🔴 High Risk\" :\n    s.risk === \"medium\" ? \"🟠 Medium Risk\" :\n    \"🟢 Low Risk\";\n\n  // factors может быть строкой или массивом — нормализуем\n  const factorsArray = Array.isArray(s.factors)\n    ? s.factors\n    : String(s.factors || \"\").split(\",\").map(f => f.trim()).filter(Boolean);\n\n  const text = `\n<b>Crypto Insight: ${s.symbol}</b>\n\n📌 <b>Recommendation:</b> ${String(s.recommendation || \"\").toUpperCase()}\n⭐ <b>Confidence:</b> ${s.confidence}\n⚠️ <b>Risk:</b> ${riskColor}\n\n🧠 <b>Factors:</b>\n- ${factorsArray.join(\"\\n- \")}\n\n📝 <b>Summary:</b>\n${s.summary}\n\n<code>${s.timestamp}</code>\n────────────\n<i>n8n Automated AI Trade Insight</i>\n\n📑 <b>View full insights history:</b>\n<a href=\"${sheetUrl}\">Google Sheet</a>\n`;\n\n  return {\n    json: { text }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        448
+      ],
+      "id": "3ce66c50-07a9-4404-be7a-d786c26eaa8e",
+      "name": "Format Telegram Message"
+    },
+    {
+      "parameters": {
+        "jsCode": "const err = $json;\n\n// Иногда Error Trigger кладёт данные вот так:\nconst workflow = err.workflow?.name || err.execution?.workflowData?.name || \"Unknown workflow\";\nconst node = err.node?.name || err.failedNode?.name || \"Unknown node\";\n\n// Сообщение об ошибке\nconst message =\n  err.error?.message ||\n  err.message ||\n  err.error ||\n  \"No error message\";\n\n// Экранируем HTML\nconst safe = (str) =>\n  String(str)\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n\nreturn {\n  json: {\n    errorMessage: \n`❗️ <b>Error in Market Screener</b>\n\n<b>Workflow:</b> ${safe(workflow)}\n<b>Node:</b> ${safe(node)}\n<b>Message:</b> ${safe(message)}\n\n<b>Time:</b> ${new Date().toISOString()}\n\n────────────\n<i>n8n Automated Error Alert</i>\n<i>This message was sent automatically with n8n</i>`\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        656
+      ],
+      "id": "883524aa-1d69-4420-be6a-f95ceafe441d",
+      "name": "Format Telegram Error Message"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "let raw;\n\nconst outputs = $json.output;\n\nif (\n  Array.isArray(outputs) &&\n  outputs[0]?.content?.[0]?.text\n) {\n  raw = outputs[0].content[0].text;\n} else {\n  throw new Error(\n    \"Unexpected OpenAI response format:\\n\" +\n    JSON.stringify($json, null, 2)\n  );\n}\n\nraw = raw\n  .replace(/```json/gi, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\nconst jsonMatch = raw.match(/\\{[\\s\\S]*\\}/);\nif (!jsonMatch) {\n  throw new Error(\"No valid JSON object found in model response:\\n\" + raw);\n}\n\nraw = jsonMatch[0];\n\n// парсим JSON\nlet ai;\ntry {\n  ai = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"JSON parsing failed:\\n\" + raw + \"\\n\\nError: \" + e.message);\n}\n\nreturn {\n  json: {\n    symbol: ai.symbol,\n    timestamp: new Date().toISOString(),\n    recommendation: ai.recommendation,\n    risk: ai.risk,\n    confidence: ai.confidence,\n    factors: Array.isArray(ai.factors) ? ai.factors.join(\", \") : ai.factors,\n    summary: ai.summary,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        288
+      ],
+      "id": "0ae108a5-c21d-4c67-95d8-014713a8cf8c",
+      "name": "Extract Insight"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n\ttimestamp: $json.timestamp,\n\tsymbol: $json.symbol,\n\trecommendation: $json.recommendation,\n\trisk: $json.risk,\n\tconfidence: $json.confidence,\n\tfactors: $json.factors,\n\tsummary: $json.summary,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        288
+      ],
+      "id": "a95b9f88-636b-484b-886b-ff22941ef022",
+      "name": "Prepare Insight Row"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU",
+          "mode": "list",
+          "cachedResultName": "Market Screening Automation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 271970722,
+          "mode": "list",
+          "cachedResultName": "AI Insights",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qh-Y2W6zcxp4dPQTSYOg_DlM-ysa3jHRJSaYoQ2itDU/edit#gid=271970722"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "symbol",
+              "displayName": "symbol",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recommendation",
+              "displayName": "recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "recommendationEmoji",
+              "displayName": "recommendationEmoji",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "risk",
+              "displayName": "risk",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "riskEmoji",
+              "displayName": "riskEmoji",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "factors",
+              "displayName": "factors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1984,
+        288
+      ],
+      "id": "a71936c5-8ac2-4877-9eac-8c6d90488c97",
+      "name": "Append row in Insights",
+      "credentials": {
+        "googleApi": {
+          "id": "cFg23FT1KZiF6dC0",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "168487641",
+        "text": "={{ $json.errorMessage }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        608,
+        656
+      ],
+      "id": "5865fb0c-af68-47bc-bd13-5cad78f9f47c",
+      "name": "Send an error message",
+      "webhookId": "0e68bd46-9a17-4cb9-9b37-2881650d0981",
+      "credentials": {
+        "telegramApi": {
+          "id": "tlNJ5UcGQyktezRQ",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "18d778b8-31c7-40c6-8f21-edc545579c59",
+              "leftValue": "={{ \n  ($json.risk === 'medium' || $json.risk === 'low') \n  && parseInt($json.confidence) > 80\n}}",
+              "rightValue": "=",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1600,
+        464
+      ],
+      "id": "2fa9ba12-18a8-4077-99d4-8a51b037061b",
+      "name": "Select only good insights"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "OUTPUT RULES:\n1) Return ONLY a JSON object.\n2) No code fences, no comments, no extra text.\n3) Use EXACT schema:\n{\"symbol\":\"string\",\"recommendation\":\"long|short|neutral\",\"confidence\":\"0-100%\",\"risk\":\"low|medium|high\",\"factors\":[\"reason1\",\"reason2\",\"reason3\"],\"summary\":\"string\"}"
+            },
+            {
+              "content": "={{\n  \"symbol=\" + $json[\"symbol\"] + \"\\n\" +\n  \"ph=\" + $json[\"primaryHigh\"] + \"\\n\" +\n  \"sh=\" + $json[\"secondaryHigh\"] + \"\\n\" +\n  \"pl=\" + $json[\"primaryLow\"] + \"\\n\" +\n  \"sl=\" + $json[\"secondaryLow\"] + \"\\n\\n\" +\n  \"Return JSON only.\"\n}}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 250,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        288
+      ],
+      "id": "1de5cbea-5076-418a-93b5-599048eccf9c",
+      "name": "AI Trade Insight",
+      "credentials": {
+        "openAiApi": {
+          "id": "j2qEVgJkVL5JMOK6",
+          "name": "OpenAi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get BTC OHLC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get GOLD OHLC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get NASDAQ OHLC",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get AAPL OHLC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get BTC OHLC": {
+      "main": [
+        [
+          {
+            "node": "Normalize BTC Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GOLD OHLC": {
+      "main": [
+        [
+          {
+            "node": "Normalize GOLD Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NASDAQ OHLC": {
+      "main": [
+        [
+          {
+            "node": "Normalize NASDAQ Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get AAPL OHLC": {
+      "main": [
+        [
+          {
+            "node": "Normalize AAPL Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize BTC Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Markets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize GOLD Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Markets",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Normalize NASDAQ Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Markets",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Normalize AAPL Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Markets",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge All Markets": {
+      "main": [
+        [
+          {
+            "node": "Calculate Levels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Levels": {
+      "main": [
+        [
+          {
+            "node": "Screen Markets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Trade Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Screen Markets": {
+      "main": [
+        [
+          {
+            "node": "Prepare Markets Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Markets Row": {
+      "main": [
+        [
+          {
+            "node": "Append row in Markets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Error Message": {
+      "main": [
+        [
+          {
+            "node": "Send an error message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Insight": {
+      "main": [
+        [
+          {
+            "node": "Prepare Insight Row",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Select only good insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Insight Row": {
+      "main": [
+        [
+          {
+            "node": "Append row in Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in Insights": {
+      "main": [
+        []
+      ]
+    },
+    "Select only good insights": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Trade Insight": {
+      "main": [
+        [
+          {
+            "node": "Extract Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "ad26cd3b-fa6f-4c30-9771-fa8c42de5b34",
+  "versionCounter": 25,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2025-12-05T07:32:50.864Z",
+      "createdAt": "2025-12-05T07:32:50.864Z",
+      "role": "workflow:owner",
+      "workflowId": "xyCtaPpmNEHHxitt",
+      "projectId": "Pe0kjUniwpiBd4qS",
+      "project": {
+        "updatedAt": "2025-11-08T09:00:59.033Z",
+        "createdAt": "2025-11-08T09:00:33.514Z",
+        "id": "Pe0kjUniwpiBd4qS",
+        "name": "admin admin <molodoiars@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null
+      }
+    }
+  ]
+}
