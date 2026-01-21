@@ -2,35 +2,35 @@
 
 ![AI Market Screener](screenshots/thumbnail.png)
 
-Автоматизированный скринер рынка, который ежедневно собирает данные по ключевым активам, вычисляет уровни, формирует сигналы и отправляет AI‑инсайты в Telegram. История сохраняется в Google Sheets — всё в одном месте.
+An automated market screener that pulls daily data for key assets, calculates levels, generates signals, and sends AI insights to Telegram. All history is saved to Google Sheets — everything in one place.
 
-## Польза для клиента
-- Экономия времени: краткие, понятные сигналы без ручного анализа.
-- Единый источник правды: история рынков и инсайтов хранится в таблице.
-- Оперативные уведомления: Telegram‑сообщения приходят сразу после расчётов.
-- Масштабируемость: легко добавлять новые активы и каналы.
+## Client Value
+- Save time: clear, concise signals without manual analysis.
+- Single source of truth: market history and insights stored in one sheet.
+- Fast notifications: Telegram messages arrive right after calculations.
+- Scalable: easy to add new assets and channels.
 
-## Что делает система
-1. По расписанию собирает котировки BTC, золота, NASDAQ и AAPL.
-2. Нормализует данные и рассчитывает ключевые уровни.
-3. Определяет сигнал: bullish / bearish / neutral.
-4. Генерирует AI‑инсайт (рекомендация, риск, уверенность, факторы).
-5. Записывает результаты в Google Sheets и отправляет в Telegram.
-6. При ошибках присылает автоматический алерт.
+## What It Does
+1. On schedule, fetches quotes for BTC, Gold, NASDAQ, and AAPL.
+2. Normalizes data and calculates key levels.
+3. Classifies signal: bullish / bearish / neutral.
+4. Generates an AI insight (recommendation, risk, confidence, factors).
+5. Writes results to Google Sheets and sends to Telegram.
+6. Sends automatic error alerts on failures.
 
-## Интеграции
-- n8n (оркестрация)
-- Coingecko, Yahoo Finance (источники данных)
-- OpenAI (AI‑инсайты)
-- Telegram (уведомления)
-- Google Sheets (история)
+## Integrations
+- n8n (orchestration)
+- Coingecko, Yahoo Finance (data sources)
+- OpenAI (AI insights)
+- Telegram (notifications)
+- Google Sheets (history)
 
-## Скриншоты
+## Screenshots
 
-![Сигналы и уровни](screenshots/Screenshot%20from%202025-12-06%2014-50-07.png)
-![Инсайты AI](screenshots/Screenshot%20from%202025-12-06%2014-51-47.png)
-![История в Google Sheets](screenshots/Screenshot%20from%202025-12-06%2014-54-56.png)
+![Signals and levels](screenshots/Screenshot%20from%202025-12-06%2014-50-07.png)
+![AI insights](screenshots/Screenshot%20from%202025-12-06%2014-51-47.png)
+![History in Google Sheets](screenshots/Screenshot%20from%202025-12-06%2014-54-56.png)
 
 ---
 
-Готово к быстрому внедрению и брендингу под клиента: расписание, список активов и формат сообщений легко настраиваются.
+Ready for fast client branding and rollout: schedule, asset list, and message format are easy to customize.
