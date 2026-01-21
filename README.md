@@ -1,7 +1,5 @@
 # AI Market Screener
 
-![AI Market Screener](screenshots/thumbnail.png)
-
 An automated market screener that pulls daily data for key assets, calculates levels, generates signals, and sends AI insights to Telegram. All history is saved to Google Sheets — everything in one place.
 
 ## Client Value
