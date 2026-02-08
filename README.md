@@ -8,9 +8,6 @@ Market Screener — Telegram bot for crypto/X threat intel with immediate risk a
 3. If risk -> 🚨 immediate alert
 4. `/digest` -> curated summary with evidence
 
-![Demo](screenshots/thumbnail.png)
-![Digest](screenshots/Screenshot%20from%202025-12-06%2014-51-47.png)
-
 **What It Does**
 - Ingest (Telegram) -> normalize/dedup -> store in Postgres
 - LLM classification (strict JSON validation, retries)
@@ -23,7 +20,7 @@ flowchart LR
   TG[Telegram] --> Router[n8n Router]
   Router --> Ingest[Inbox Ingest]
   Ingest --> Process[Process New Event]
-  Process --> DB[Supabase (Postgres)]
+  Process --> DB[Supabase Postgres]
   DB --> TG
 ```
 
