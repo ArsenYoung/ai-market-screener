@@ -1,0 +1,117 @@
+{
+  "name": "SUB WF Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "08a0e0d2-f37e-401a-86a5-de1039480765",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "function safeNum(x, def = 0) {\n  const n = Number(x);\n  return Number.isFinite(n) ? n : def;\n}\n\nfunction clamp(n, a, b) {\n  return Math.max(a, Math.min(b, n));\n}\n\nfunction trunc(s, n) {\n  s = (s ?? \"\").toString();\n  return s.length > n ? s.slice(0, n - 1) + \"…\" : s;\n}\n\nfunction escapeHtml(s) {\n  s = (s ?? \"\").toString();\n  return s\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n}\n\nfunction stripNoise(s) {\n  s = (s ?? \"\").toString();\n  s = s.replace(/[\"'“”‘’]/g, \"\");\n  s = s.replace(/\\$/g, \"\");\n  s = s.replace(/\\s+/g, \" \").trim();\n  return s;\n}\n\nfunction extractDomain(u) {\n  try {\n    const url = new URL(u);\n    return url.hostname.replace(/^www\\./, \"\");\n  } catch (_) {\n    return \"\";\n  }\n}\n\nfunction parseEvidenceItem(e0) {\n  let text = \"\";\n  let sourceUrl = \"\";\n  let sourceDomain = \"\";\n\n  if (typeof e0 === \"string\") {\n    text = e0;\n  } else if (e0 && typeof e0 === \"object\") {\n    text = e0.quote || e0.text || e0.snippet || \"\";\n    sourceUrl = e0.url || e0.source_url || e0.link || e0.source || \"\";\n    if (typeof sourceUrl !== \"string\") sourceUrl = \"\";\n  } else if (e0 != null) {\n    text = String(e0);\n  }\n\n  if (!sourceUrl) {\n    const m = (text || \"\").match(/https?:\\/\\/\\S+/i);\n    if (m) sourceUrl = m[0];\n  }\n\n  if (sourceUrl) sourceDomain = extractDomain(sourceUrl);\n  return { text, sourceUrl, sourceDomain };\n}\n\nfunction formatEvidence(evidenceArr, maxLen = 140) {\n  if (!Array.isArray(evidenceArr) || evidenceArr.length === 0) return \"\";\n  const { text, sourceDomain } = parseEvidenceItem(evidenceArr[0]);\n\n  const clean = stripNoise(text);\n  if (!clean) return \"\";\n\n  const withSource = sourceDomain ? `${clean} — source: ${sourceDomain}` : clean;\n  return trunc(withSource, maxLen);\n}\n\nfunction isEventRow(x) {\n  return x && typeof x === \"object\"\n    && (x.event_id || x.category)\n    && (x.priority !== undefined || x.confidence !== undefined);\n}\n\nfunction normalizeAction(rawAction, category) {\n  const s = (rawAction ?? \"\").toString().toLowerCase().trim();\n\n  // RISK: всегда проверяем статус/ончейн (даже если \"official statement\")\n  if (category === \"RISK_FUD\") {\n    if (\n      s.includes(\"on-chain\") || s.includes(\"status page\") ||\n      s.includes(\"withdraw\") || s.includes(\"deposit\") ||\n      s.includes(\"halt\") || s.includes(\"suspend\") ||\n      s.includes(\"proof\") || s.includes(\"verify\") || s.includes(\"check\") ||\n      s.includes(\"official\") || s.includes(\"statement\") || s.includes(\"confirm\") ||\n      s.includes(\"announce\") || s.includes(\"announcement\") ||\n      s.includes(\"delay\") || s.includes(\"delayed\")\n    ) {\n      return \"Check on-chain / status page\";\n    }\n  }\n\n  if (!s) {\n    if (category === \"LISTING_RUMOR\") return \"Wait for official confirmation\";\n    if (category === \"RISK_FUD\") return \"Check on-chain / status page\";\n    if (category === \"ALPHA_CALL\") return \"Add to watchlist\";\n    if (category === \"NARRATIVE\") return \"Ignore / low signal\";\n    return \"Add to watchlist\";\n  }\n\n  if (\n    s.includes(\"second source\") || s.includes(\"2nd source\") ||\n    s.includes(\"independent source\") || s.includes(\"cross-check\") ||\n    s.includes(\"corroborat\") || (s.includes(\"collect\") && s.includes(\"source\")) ||\n    s.includes(\"more source\")\n  ) return \"Collect 2nd source\";\n\n  if (\n    s.includes(\"official\") || s.includes(\"confirm\") || s.includes(\"confirmation\") ||\n    s.includes(\"statement\") || s.includes(\"announce\") || s.includes(\"announcement\")\n  ) return \"Wait for official confirmation\";\n\n  if (\n    s.includes(\"watchlist\") || s.includes(\"add to watch\") || s.includes(\"track\") ||\n    s.includes(\"follow\") || s.includes(\"keep on radar\")\n  ) return \"Add to watchlist\";\n\n  if (\n    s.includes(\"ignore\") || s.includes(\"low signal\") || s.includes(\"noise\") ||\n    s.includes(\"no action\") || s.includes(\"skip\") || s.includes(\"dismiss\")\n  ) return \"Ignore / low signal\";\n\n  if (\n    s.includes(\"on-chain\") || s.includes(\"status page\") ||\n    s.includes(\"withdraw\") || s.includes(\"deposit\") ||\n    s.includes(\"halt\") || s.includes(\"suspend\") ||\n    s.includes(\"proof\") || s.includes(\"verify\") || s.includes(\"check\")\n  ) {\n    if (category === \"RISK_FUD\") return \"Check on-chain / status page\";\n    if (category === \"LISTING_RUMOR\") return \"Wait for official confirmation\";\n    return \"Add to watchlist\";\n  }\n\n  if (\n    s.includes(\"monitor\") || s.includes(\"wait\") || s.includes(\"observe\") ||\n    s.includes(\"keep an eye\") || s.includes(\"watch\")\n  ) {\n    if (category === \"RISK_FUD\") return \"Check on-chain / status page\";\n    if (category === \"LISTING_RUMOR\") return \"Wait for official confirmation\";\n    if (category === \"NARRATIVE\") return \"Ignore / low signal\";\n    return \"Add to watchlist\";\n  }\n\n  if (category === \"LISTING_RUMOR\") return \"Wait for official confirmation\";\n  if (category === \"RISK_FUD\") return \"Check on-chain / status page\";\n  return \"Add to watchlist\";\n}\n\n// 1) events\nlet events = [];\nif (Array.isArray($json.events)) {\n  events = $json.events;\n} else {\n  const all = $input.all().map(i => i.json);\n  events = all.filter(isEventRow);\n}\n\n// 2) weights\nconst weights = ($json.category_weights && typeof $json.category_weights === \"object\")\n  ? $json.category_weights\n  : {};\n\n// 3) quotas/groups\nconst QUOTA = { ALPHA_CALL: 3, LISTING_RUMOR: 2, NARRATIVE: 2, RISK_FUD: 3 };\n\nconst GROUP = [\n  { key: \"ALPHA_CALL\", title: \"🟢 <b>ALPHA</b>\", quota: QUOTA.ALPHA_CALL },\n  { key: \"LISTING_RUMOR\", title: \"🟡 <b>LISTING</b>\", quota: QUOTA.LISTING_RUMOR },\n  { key: \"NARRATIVE\", title: \"🔵 <b>NARRATIVE</b>\", quota: QUOTA.NARRATIVE },\n  { key: \"RISK_FUD\", title: \"🔴 <b>RISK</b>\", quota: QUOTA.RISK_FUD },\n];\n\nconst WINDOW_LABEL = $json.window_label || \"24h\";\n\n// 4) score\nconst scored = events\n  .filter(e => e && typeof e === \"object\")\n  .filter(e => Array.isArray(e.evidence) && e.evidence.length >= 1)\n  .filter(e => [\"ALPHA_CALL\", \"LISTING_RUMOR\", \"NARRATIVE\", \"RISK_FUD\"].includes(e.category))\n  .map(e => {\n    const pri = clamp(safeNum(e.priority, 1), 1, 5);\n    const w = safeNum(weights[e.category], 0);\n    const ts = e.ts ? new Date(e.ts) : new Date(0);\n    const rank = pri + w;\n\n    const action = normalizeAction(e.suggested_action || e.next_action || \"\", e.category);\n    const ev = formatEvidence(e.evidence, 140);\n\n    return { ...e, pri, w, rank, ts, action, ev };\n  });\n\nif (scored.length === 0) {\n  const html =\n    `🗂 <b>Digest (${escapeHtml(WINDOW_LABEL)})</b>\\n` +\n    `\\nNo verified items (with evidence) in the last ${escapeHtml(WINDOW_LABEL)}.\\n` +\n    `\\nTip: send a post text or tap <code>/demo</code>.`;\n\n  return [{\n    json: {\n      reply_text: html,\n      parse_mode: \"HTML\",\n      digest_count: 0,\n    },\n  }];\n}\n\n// 5) group + sort\nconst byCat = new Map();\nfor (const s of scored) {\n  const k = s.category || \"UNKNOWN\";\n  if (!byCat.has(k)) byCat.set(k, []);\n  byCat.get(k).push(s);\n}\nfor (const [k, arr] of byCat) {\n  arr.sort((a, b) => (b.rank - a.rank) || (b.ts - a.ts));\n}\n\n// 6) summary based on shown items\nlet summaryCounts = { risk: 0, listings: 0, alpha: 0 };\nfor (const g of GROUP) {\n  const arr = byCat.get(g.key) || [];\n  const top = arr.slice(0, g.quota);\n  if (g.key === \"RISK_FUD\") summaryCounts.risk += top.length;\n  if (g.key === \"LISTING_RUMOR\") summaryCounts.listings += top.length;\n  if (g.key === \"ALPHA_CALL\") summaryCounts.alpha += top.length;\n}\n\n// 7) build HTML\nlet lines = [];\nlines.push(`🗂 <b>Digest (${escapeHtml(WINDOW_LABEL)})</b>`);\nlines.push(`Top: ${summaryCounts.risk} risk, ${summaryCounts.listings} listings, ${summaryCounts.alpha} alpha`);\n\nfor (const g of GROUP) {\n  const arr = byCat.get(g.key) || [];\n  const top = arr.slice(0, g.quota);\n  if (top.length === 0) continue;\n\n  lines.push(\"\");\n  lines.push(`${g.title} (${top.length})`);\n\n  top.forEach((x, idx) => {\n    const p = safeNum(x.pri, 0);\n    const action = escapeHtml(x.action);\n    lines.push(`${idx + 1}) p${p} • ${action}`);\n    if (x.ev) lines.push(`   ${escapeHtml(x.ev)}`);\n  });\n}\n\nlet reply_html = lines.join(\"\\n\");\nreply_html = trunc(reply_html, 3500);\n\nreturn [{\n  json: {\n    reply_text: reply_html,\n    parse_mode: \"HTML\",\n    digest_count: scored.length,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        0
+      ],
+      "id": "dcaab55e-56b4-456d-bf37-54b040b25d2c",
+      "name": "Build digest text"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: multiple items from Postgres (each item = one row)\n// Output: single item { events: [...], window_label, category_weights }\n\nfunction pick(obj, keys) {\n  const out = {};\n  for (const k of keys) out[k] = obj?.[k];\n  return out;\n}\n\nconst FIELDS = [\n  \"event_id\",\n  \"ts\",\n  \"category\",\n  \"priority\",\n  \"confidence\",\n  \"tags\",\n  \"evidence\",\n  \"suggested_action\",\n];\n\n// collect rows\nconst rows = $input.all().map(i => i.json).filter(x => x && typeof x === \"object\");\n\n// map to minimal event objects\nconst events = rows.map(r => {\n  const e = pick(r, FIELDS);\n\n  // normalize arrays\n  if (!Array.isArray(e.tags)) e.tags = [];\n  if (!Array.isArray(e.evidence)) e.evidence = [];\n\n  // normalize numbers\n  e.priority = Number.isFinite(Number(e.priority)) ? Number(e.priority) : null;\n  e.confidence = Number.isFinite(Number(e.confidence)) ? Number(e.confidence) : null;\n\n  return e;\n});\n\n// Optional: if Postgres returned 0 rows, still output a single payload\nreturn [{\n  json: {\n    window_label: \"24h\",\n    category_weights: {}, // подключишь позже из prefs\n    events,\n    events_count: events.length,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "c85381e1-9bdf-4865-8526-2324c69377e1",
+      "name": "AGG: Build digest payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  event_id,\n  ts,\n  category,\n  priority,\n  confidence,\n  tags,\n  evidence,\n  suggested_action\nfrom intel_events\nwhere chat_id = $1\n  and ts >= now() - interval '24 hours'\n  and evidence is not null\n  and jsonb_typeof(evidence) = 'array'\n  and jsonb_array_length(evidence) >= 1\n  and category in ('ALPHA_CALL','LISTING_RUMOR','NARRATIVE','RISK_FUD')\norder by ts desc\nlimit 200;",
+        "options": {
+          "queryReplacement": "{{ $json.chat_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        208,
+        0
+      ],
+      "id": "a24e9ab3-a737-4bba-9479-c438a1662108",
+      "name": "DB: Select digest events (24h)",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "DB: Select digest events (24h)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AGG: Build digest payload": {
+      "main": [
+        [
+          {
+            "node": "Build digest text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Select digest events (24h)": {
+      "main": [
+        [
+          {
+            "node": "AGG: Build digest payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e543ed18-df92-4eee-b3fa-f57012bcb1da",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "NqJdboe-hm7vhbTTA8gH-",
+  "tags": []
+}

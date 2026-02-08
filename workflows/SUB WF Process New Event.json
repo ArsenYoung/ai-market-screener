@@ -1,0 +1,906 @@
+{
+  "name": "SUB WF Process New Event",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        176,
+        0
+      ],
+      "id": "fb962edd-0e19-429b-865e-e22d2544c198",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Проверяем, что нам передали event_id\nconst event_id = $json.event_id;\n\nif (!event_id) {\n  return [{\n    json: {\n      ok: false,\n      error: \"ERR missing event_id\",\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...$json,\n    event_id: String(event_id),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        0
+      ],
+      "id": "3e118484-cec9-47cf-8c08-2a65dafc3277",
+      "name": "Validate input"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  event_id,\n  chat_id,\n  kb_ref,\n  source,\n  text,\n  payload,\n  status\nfrom public.intel_events\nwhere event_id = $1\nlimit 1;",
+        "options": {
+          "queryReplacement": "{{$json.event_id}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        608,
+        0
+      ],
+      "id": "59ee61eb-6610-4afd-aa0d-5ed48f18fa43",
+      "name": "Load intel_event by id",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "da6f01f3-bd27-4585-887f-bdea3fb3e51f",
+              "leftValue": "={{ ($json.status ?? '').trim().toLowerCase() }}",
+              "rightValue": "new",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        0
+      ],
+      "id": "89ba26b9-1a84-495a-b70e-837501b7e618",
+      "name": "IF status is new?"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ...$json,\n    ok: true,\n    reply_text: 'Please send the post text (copy/paste). Use /help for examples.',\n    parse_mode: 'HTML',\n    llm_skipped: true,\n    llm_skip_reason: 'empty_text',\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        16
+      ],
+      "id": "3ebf0d4e-8297-4860-9ec4-559ce92f06c8",
+      "name": "Return skip"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n Code node — Run Once for Each Item\n// Builds llm_system + llm_user for classification\n\nconst allowedCategories = [\"ALPHA_CALL\",\"LISTING_RUMOR\",\"NARRATIVE\",\"RISK_FUD\",\"NOISE\"];\nconst textRaw = String($json.payload?.text_for_llm ?? $json.text ?? \"\").trim();\n\nconst out = { ...$json, has_text: Boolean(textRaw) };\n\nif (!textRaw) {\n  out.llm_skip = true;\n  out.llm_skip_reason = \"empty_text\";\n  out.llm_system = \"\";\n  out.llm_user = \"\";\n  return { json: out };\n}\n\nout.llm_system = `\nYou are a strict JSON generator for a crypto X/Twitter signal screener.\n\nReturn ONLY a single JSON object that matches the schema and uses ONLY these keys:\ncategory, priority, confidence, tags, evidence, suggested_action, draft_reply, should_alert\n\nGLOBAL CONSTRAINTS (HARD):\n- Avoid financial/trading advice. Do NOT recommend buying/selling, \"entry\", \"positioning\", \"ape\", \"moon\", etc.\n- draft_reply must be neutral and non-promotional.\n\nCATEGORY RULES (HARD, pick exactly one):\n1) LISTING_RUMOR:\n   Use ONLY for exchange listing rumors/hints: \"listing soon\", \"hearing\", \"shortlist\", \"T1 exchange\",\n   or explicit exchanges (Binance, Coinbase, OKX, Bybit, KuCoin, Bitget, Upbit, etc.).\n   Not \"launched\" / \"listed\" unless it clearly refers to an exchange listing.\n2) RISK_FUD:\n   Scam/rug/insiders/dilution/wallet drain/exploit/freeze/delist/withdrawal issues, or explicit \"avoid/don't touch\".\n3) ALPHA_CALL:\n   Direct call to act (e.g., \"buy/ape/entry/accumulate\") OR a bullish ticker pick/thesis,\n   and NO exchange-listing hints and NO primary risk warning.\n4) NARRATIVE:\n   Market thesis/trend/context explanation without a direct call to act.\n5) NOISE:\n   Memes/vibes/banter/vague hype, jokes, irony, or low-information statements without a concrete claim.\n\nPRIORITY SCALE (HARD — use the edges when criteria match; don't be afraid of 1 or 5):\n- 5 = urgent risk of losing funds / delist / exploit / freeze / scam (needs alert).\n- 4 = potentially significant catalyst (exchange listing rumor OR confirmed major event) OR a strong risk warning that is serious but less urgent than 5.\n- 3 = actionable trade idea without strong risk (normal ALPHA_CALL) or a meaningful narrative with some substance.\n- 2 = overview/context without action (typical NARRATIVE) or weak/low-info call.\n- 1 = noise/meme/banter.\n\nEDGE-SELECTION RULE:\n- If the text clearly matches a 5 or 1 definition, choose it (avoid always picking 2–3).\n- If unsure between adjacent levels, choose the LOWER one (more conservative), except for clear urgent risk -> 5.\n\nEVIDENCE (HARD):\n- evidence must be 1–3 verbatim short quotes from the input text (<=120 chars each).\n- If confidence >= 0.6, include at least 1 evidence quote.\n- Do not include URLs or metadata in evidence.\n\nCONFIDENCE (0..1):\n- 0.8–1.0: very clear category + clear evidence in text\n- 0.6–0.8: likely but some ambiguity\n- <0.6: ambiguous / low-info\n\nTAGS (HARD):\n- 1–8 short nouns/proper nouns (tickers, exchange names, \"listing\", \"rumor\", \"scam\", \"exploit\").\n- No emojis. No long phrases.\n\nSUGGESTED_ACTION (HARD):\n- Must be ONE concrete neutral sentence (<=160 chars).\n- No trading advice. No comma-separated checklists.\n- Examples (good):\n  - \"Add to watchlist and wait for official confirmation from the exchange.\"\n  - \"Collect independent sources and look for an official statement before taking action.\"\n  - \"Treat as noise and deprioritize unless it becomes specific.\"\n\nRISK_FUD suggested_action (HARD):\n- Must include 1–2 concrete verification steps (sources / on-chain signals / official statement). No trading advice.\n\nALERT (HARD):\n- should_alert=true ONLY if category==\"RISK_FUD\" AND priority>=4 AND confidence>=0.70\n- Otherwise should_alert=false.\n\nOUTPUT FORMAT (HARD):\n- Return ONLY JSON. No markdown. No extra text.\n`.trim();\n\nout.llm_user = `Text:\\n${textRaw}`;\n\nout.llm_skip = false;\ndelete out.llm_skip_reason;\n\nreturn { json: out };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -96
+      ],
+      "id": "9d07e322-5ae8-4e2f-a073-fb8816f293af",
+      "name": "Build LLM prompt"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{$json.llm_user}}"
+            },
+            {
+              "role": "system",
+              "content": "={{$json.llm_system}}"
+            }
+          ]
+        },
+        "simplify": false,
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1712,
+        -16
+      ],
+      "id": "8bef3683-9373-4bc5-b087-15fd4fe52191",
+      "name": "LLM classify",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "openAiApi": {
+          "id": "szpBWy88gJHBt0BR",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse + Validate LLM JSON (strict, demo-safe) — Run Once for Each Item\n// - extracts text/object from OpenAI/n8n response\n// - extracts first JSON object from any surrounding text\n// - validates allowed keys, types, ranges\n// - evidence penalty: if confidence>=0.6 && evidence empty => confidence=0.5 (AFTER sanitize)\n// - enforces should_alert gate: true ONLY for RISK_FUD, else false\n// - scrubs financial advice from suggested_action/draft_reply\n// - replaces weak/list-like suggested_action with one concrete sentence\n// - enforces min priority for top-CEX listing rumors + strong RISK_FUD language\n// - NEW (Variant B): evidence becomes quotes from input text; source/meta kept in evidence_base separately\n\nfunction isPlainObject(x) {\n  return x !== null && typeof x === \"object\" && !Array.isArray(x);\n}\n\nfunction safeString(x) {\n  if (x === null || x === undefined) return \"\";\n  return String(x);\n}\n\n// Try to pick the model output from various n8n/OpenAI response shapes\nfunction pickLLMTextOrObject(j) {\n  if (isPlainObject(j) && j.category && j.priority !== undefined) return j;\n  if (typeof j?.text === \"string\") return j.text;\n  if (typeof j?.output_text === \"string\") return j.output_text;\n\n  const out = j?.output;\n  if (Array.isArray(out)) {\n    let acc = \"\";\n    for (const msg of out) {\n      const content = msg?.content;\n      if (Array.isArray(content)) {\n        for (const c of content) {\n          if (typeof c?.text === \"string\") acc += c.text;\n        }\n      }\n    }\n    if (acc.trim()) return acc;\n  }\n\n  if (typeof j?.message?.content === \"string\") return j.message.content;\n  if (typeof j?.content === \"string\") return j.content;\n  if (isPlainObject(j)) return j;\n  return \"\";\n}\n\n// Extract first JSON object substring from string\nfunction extractJSONObjectString(s) {\n  const str = safeString(s);\n  const start = str.indexOf(\"{\");\n  if (start === -1) return null;\n\n  let depth = 0;\n  let inStr = false;\n  let esc = false;\n\n  for (let i = start; i < str.length; i++) {\n    const ch = str[i];\n\n    if (inStr) {\n      if (esc) esc = false;\n      else if (ch === \"\\\\\") esc = true;\n      else if (ch === \"\\\"\") inStr = false;\n      continue;\n    } else {\n      if (ch === \"\\\"\") { inStr = true; continue; }\n      if (ch === \"{\") depth++;\n      if (ch === \"}\") depth--;\n      if (depth === 0) return str.slice(start, i + 1);\n    }\n  }\n  return null;\n}\n\nfunction isInt(n) { return Number.isInteger(n); }\nfunction isNum(n) { return typeof n === \"number\" && Number.isFinite(n); }\nfunction clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }\n\nfunction containsAny(hay, needles) {\n  const s = safeString(hay).toLowerCase();\n  return needles.some(x => s.includes(x));\n}\n\n// dedupe helper (case-insensitive)\nfunction uniqStrings(arr) {\n  const seen = new Set();\n  const out = [];\n  for (const x of arr) {\n    const v = safeString(x).trim();\n    if (!v) continue;\n    const k = v.toLowerCase();\n    if (seen.has(k)) continue;\n    seen.add(k);\n    out.push(v);\n  }\n  return out;\n}\n\n// build deterministic source/meta evidence (kept separately from evidence quotes)\nfunction buildEvidenceBase(j) {\n  const out = [];\n\n  const urls = Array.isArray(j?.url_list) ? j.url_list : [];\n  for (const u of urls) {\n    const s = safeString(u).trim();\n    if (s) out.push(s.length > 180 ? s.slice(0, 180) : s);\n  }\n\n  const su = safeString(j?.source_url).trim();\n  if (su) out.push(su.length > 180 ? su.slice(0, 180) : su);\n\n  const src = safeString(j?.source).trim();\n  const kb = safeString(j?.kb_ref).trim();\n  if (src || kb) out.push(`source:${src || \"unknown\"}${kb ? ` kb:${kb}` : \"\"}`.slice(0, 180));\n\n  const author = safeString(j?.author).trim();\n  if (author) out.push(`author:${author}`.slice(0, 180));\n\n  return uniqStrings(out).slice(0, 3);\n}\n\n// Scrub obvious trading/financial advice from free-text fields.\nfunction scrubAdvice(s) {\n  const str = safeString(s).trim();\n  if (!str) return \"\";\n\n  const banned =\n    /\\b(buy|sell|entry|entries|position(ing)?|ape|moon|long|short|pump|dump|load up|accumulate|accumulating)\\b/i;\n\n  if (banned.test(str)) return \"\";\n  return str;\n}\n\nfunction looksLikeCommaListAction(s) {\n  const x = safeString(s).toLowerCase().trim();\n  const parts = x.split(\",\").map(p => p.trim()).filter(Boolean);\n  if (parts.length < 3) return false;\n  return /(verify|monitor|watchlist|wait for confirmation|confirmation|assess risk|collect sources)/.test(x);\n}\n\nfunction isTooVagueAction(s) {\n  const x = safeString(s).toLowerCase().trim();\n  return x === \"monitor\" || x === \"verify\" || x === \"watch\" || x === \"assess risk\" || x === \"monitor for updates\";\n}\n\n// ---------------- Evidence Variant B: keep ONLY quotes from input text ----------------\nfunction normSpaces(s) {\n  return safeString(s).replace(/\\s+/g, \" \").trim();\n}\n\nfunction stripQuotes(s) {\n  return safeString(s).replace(/^[“\"'\\s]+|[”\"'\\s]+$/g, \"\").trim();\n}\n\nfunction containsLoose(haystack, needle) {\n  const h = normSpaces(haystack).toLowerCase();\n  const n = normSpaces(needle).toLowerCase();\n  return n.length >= 6 && h.includes(n);\n}\n\nfunction isEvidenceNoise(s) {\n  const t = normSpaces(s).toLowerCase();\n  if (!t) return true;\n\n  // obvious meta/junk\n  if (t.includes(\"source:\") || t.includes(\"kb:\") || t.includes(\"kb_ref\")) return true;\n  if (t.includes(\"http://\") || t.includes(\"https://\") || t.includes(\"t.me/\")) return true;\n  if (t.startsWith(\"url\") || t.startsWith(\"author:\")) return true;\n\n  // too short = useless\n  if (t.length < 8) return true;\n\n  return false;\n}\n\nfunction splitToCandidates(text) {\n  const raw = safeString(text);\n  const parts = raw\n    .split(/\\n+|(?<=[.!?])\\s+/)\n    .map(normSpaces)\n    .filter(Boolean);\n\n  const seen = new Set();\n  const out = [];\n  for (const p of parts) {\n    const key = p.toLowerCase();\n    if (seen.has(key)) continue;\n    seen.add(key);\n    out.push(p);\n  }\n  return out;\n}\n\nfunction pickEvidenceSnippetsFromText(text, maxItems = 2) {\n  const candidates = splitToCandidates(text);\n\n  const kw = [\n    \"risk\",\"scam\",\"hack\",\"exploit\",\"rug\",\"withdraw\",\n    \"delist\",\"freeze\",\"ban\",\"suspicious\",\"drain\",\n    \"listing\",\"binance\",\"coinbase\",\"okx\",\"bybit\",\"rumor\",\"hearing\",\n    \"not confirmed\",\"reports\",\"delayed\"\n  ];\n\n  const scored = candidates.map((c) => {\n    const lc = c.toLowerCase();\n    let score = 0;\n    for (const k of kw) if (lc.includes(k)) score += 2;\n    if (c.length >= 30 && c.length <= 180) score += 1;\n    return { c, score };\n  });\n\n  scored.sort((a, b) => b.score - a.score);\n\n  const picked = [];\n  for (const { c } of scored) {\n    if (picked.length >= maxItems) break;\n    picked.push(c);\n  }\n\n  if (picked.length === 0 && candidates.length > 0) {\n    picked.push(candidates[0]);\n    if (candidates[1]) picked.push(candidates[1]);\n  }\n\n  return picked.map((x) => {\n    const s = normSpaces(x);\n    return s.length > 180 ? s.slice(0, 177) + \"…\" : s;\n  });\n}\n\nfunction sanitizeEvidenceFromText(llmEvidence, text, maxItems = 3) {\n  const t = safeString(text);\n  const arr = Array.isArray(llmEvidence) ? llmEvidence : [];\n\n  const cleaned = [];\n  const seen = new Set();\n\n  for (const raw of arr) {\n    let e = stripQuotes(normSpaces(raw));\n    if (isEvidenceNoise(e)) continue;\n\n    if (e.length > 220) e = e.slice(0, 217) + \"…\";\n\n    if (!containsLoose(t, e)) continue;\n\n    const key = e.toLowerCase();\n    if (!seen.has(key)) {\n      seen.add(key);\n      cleaned.push(e);\n    }\n    if (cleaned.length >= maxItems) break;\n  }\n\n  if (cleaned.length === 0) {\n    return pickEvidenceSnippetsFromText(t, Math.min(2, maxItems));\n  }\n\n  return cleaned;\n}\n\n// ---------------- main ----------------\nconst j = $json;\nconst raw = pickLLMTextOrObject(j);\n\nlet obj = null;\nlet rawText = \"\";\n\nif (isPlainObject(raw)) {\n  obj = raw;\n} else {\n  rawText = safeString(raw).trim();\n\n  const jsonStr = rawText.startsWith(\"{\") ? rawText : extractJSONObjectString(rawText);\n  if (!jsonStr) {\n    return [{\n      json: { ...j, llm_ok: false, llm_error: \"No JSON object found\", llm_raw: rawText.slice(0, 4000) }\n    }];\n  }\n\n  try {\n    obj = JSON.parse(jsonStr);\n  } catch (e) {\n    return [{\n      json: { ...j, llm_ok: false, llm_error: \"JSON.parse failed\", llm_raw: rawText.slice(0, 4000) }\n    }];\n  }\n}\n\nif (!isPlainObject(obj)) {\n  return [{\n    json: { ...j, llm_ok: false, llm_error: \"Parsed value is not an object\", llm_obj: obj }\n  }];\n}\n\nconst allowedKeys = new Set([\n  \"category\",\"priority\",\"confidence\",\"tags\",\"evidence\",\"suggested_action\",\"draft_reply\",\"should_alert\"\n]);\n\nconst extraKeys = Object.keys(obj).filter(k => !allowedKeys.has(k));\nif (extraKeys.length) {\n  return [{\n    json: { ...j, llm_ok: false, llm_error: `Extra keys: ${extraKeys.join(\", \")}`, llm_obj: obj }\n  }];\n}\n\nconst allowedCategories = new Set([\"ALPHA_CALL\",\"LISTING_RUMOR\",\"NARRATIVE\",\"RISK_FUD\",\"NOISE\"]);\n\nlet {\n  category,\n  priority,\n  confidence,\n  tags,\n  evidence,\n  suggested_action,\n  draft_reply,\n  should_alert,\n} = obj;\n\n// category\nif (typeof category !== \"string\" || !allowedCategories.has(category)) {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad category\", llm_obj: obj } }];\n}\n\n// priority\nif (!isInt(priority) || priority < 1 || priority > 5) {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad priority\", llm_obj: obj } }];\n}\n\n// confidence\nif (!isNum(confidence) || confidence < 0 || confidence > 1) {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad confidence\", llm_obj: obj } }];\n}\n\n// tags\nif (!Array.isArray(tags) || tags.length > 10 || tags.some(t => typeof t !== \"string\" || !t.trim())) {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad tags\", llm_obj: obj } }];\n}\ntags = tags.map(t => t.trim()).filter(Boolean).slice(0, 10);\n\n// evidence (LLM evidence only; we will sanitize later)\nif (!Array.isArray(evidence) || evidence.length > 5 || evidence.some(t => typeof t !== \"string\" || t.length > 220 || !t.trim())) {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad evidence\", llm_obj: obj } }];\n}\nevidence = evidence.map(t => t.trim()).filter(Boolean).slice(0, 5);\n\n// suggested_action\nif (typeof suggested_action !== \"string\" || !suggested_action.trim() || suggested_action.length > 200) {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad suggested_action\", llm_obj: obj } }];\n}\nsuggested_action = suggested_action.trim();\n\n// draft_reply (optional)\nif (draft_reply !== undefined) {\n  if (typeof draft_reply !== \"string\" || draft_reply.length > 400) {\n    return [{ json: { ...j, llm_ok:false, llm_error:\"Bad draft_reply\", llm_obj: obj } }];\n  }\n  draft_reply = draft_reply.trim();\n}\n\n// should_alert (LLM provided; we will gate deterministically anyway)\nif (typeof should_alert !== \"boolean\") {\n  return [{ json: { ...j, llm_ok:false, llm_error:\"Bad should_alert\", llm_obj: obj } }];\n}\n\n// ---------------- demo-safe fixes ----------------\n\n// Original text (keep both raw and lower for rules)\nconst sourceTextRaw = safeString(j?.payload?.text_for_llm ?? j?.text ?? \"\");\nconst sourceText = sourceTextRaw.toLowerCase();\n\n// Enforce min priority rules based on ORIGINAL text\nconst topCex = [\"binance\",\"coinbase\",\"okx\",\"bybit\"];\nconst strongRisk = [\"scam\",\"rug\",\"avoid\",\"don't touch\",\"dont touch\",\"insiders\",\"dumping\",\"exploit\",\"drain\",\"withdraw\",\"delayed\",\"freeze\",\"delist\"];\n\nlet pr = priority;\n\nif (category === \"LISTING_RUMOR\" && containsAny(sourceText, topCex) && pr < 4) pr = 4;\nif (category === \"RISK_FUD\" && containsAny(sourceText, strongRisk) && pr < 4) pr = 4;\n\npr = clamp(pr, 1, 5);\n\n// Scrub advice + fix weak/list-like actions\nlet sa = scrubAdvice(suggested_action);\n\nif (sa && looksLikeCommaListAction(sa)) sa = \"\";\nif (sa && isTooVagueAction(sa)) sa = \"\";\n\nif (!sa) {\n  if (category === \"LISTING_RUMOR\") {\n    sa = \"Add to watchlist and wait for official confirmation from the exchange.\";\n  } else if (category === \"ALPHA_CALL\") {\n    sa = \"Add to watchlist and verify key claims (team, roadmap, traction) from primary sources.\";\n  } else if (category === \"RISK_FUD\") {\n    sa = \"Collect 2–3 independent sources, check available on-chain signals, and look for official statements before acting.\";\n  } else if (category === \"NARRATIVE\") {\n    sa = \"Summarize the thesis and track whether it appears across multiple reliable sources.\";\n  } else {\n    sa = \"Ignore or down-rank unless it becomes more concrete.\";\n  }\n}\nsuggested_action = sa;\n\n// Draft reply: neutral and no advice\nif (draft_reply !== undefined) {\n  const dr = scrubAdvice(draft_reply);\n  if (!dr) draft_reply = undefined;\n  else draft_reply = dr;\n}\n\n// Build evidence_base from meta\nconst evidenceBase = buildEvidenceBase(j);\n\n// Variant B: sanitize evidence into quotes from sourceTextRaw\nevidence = sanitizeEvidenceFromText(evidence, sourceTextRaw, 3);\n\n// Evidence penalty (AFTER sanitize; now evidence is quote-based)\nlet conf = confidence;\nif (conf >= 0.6 && evidence.length === 0) conf = 0.5;\nconf = clamp(conf, 0, 1);\n\n// Enforce alert gate deterministically (requires BOTH: quotes + source/meta)\nlet alert = false;\nif (category === \"RISK_FUD\") {\n  const hasQuoteEvidence = evidence.length > 0;\n  const hasSourceMeta = evidenceBase.length > 0; // urls/labels exist\n  const meets = (pr >= 4) || (pr >= 3 && conf >= 0.75);\n  alert = hasQuoteEvidence && hasSourceMeta && meets;\n}\n\n// Final output\nconst result = {\n  ...j,\n  llm_ok: true,\n  category,\n  priority: pr,\n  confidence: conf,\n  tags,\n  evidence,            // quotes only\n  evidence_base: evidenceBase, // urls/labels only\n  suggested_action,\n  should_alert: alert,\n};\n\nif (draft_reply !== undefined) result.draft_reply = draft_reply;\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        -176
+      ],
+      "id": "31e37594-0a6e-4919-8de5-38830f16e98d",
+      "name": "Parse/Validate JSON"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4d7695a3-4a44-4a16-aafb-1b0ca3ac47ef",
+              "leftValue": "={{ String($json.payload?.text_for_llm ?? $json.text ?? '').trim().length > 0 }}",
+              "rightValue": "=",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1248,
+        -96
+      ],
+      "id": "64411842-9923-4cf3-9472-9a8dff9f885d",
+      "name": "IF “has_text?”"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "464f2ffa-8fc5-439e-aed6-8bf1e8ae5d16",
+              "leftValue": "={{$json.llm_ok}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2672,
+        -176
+      ],
+      "id": "ac3f8b53-e71c-4e14-866a-88f041c55779",
+      "name": "If llm_ok?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Run Once for Each Item\n// Increment llm_try and harden the prompt to force strict JSON only.\n// Assumes you have llm_system + llm_user fields already.\n\nconst j = $json || {};\nconst llm_try = (parseInt(j.llm_try ?? 0, 10) || 0) + 1;\n\nconst lastErr = String(j.llm_error ?? \"\").slice(0, 500);\n\n// Hard “repair” instruction (put it at the top of system)\nconst repair = [\n  \"YOU MUST OUTPUT VALID JSON ONLY.\",\n  \"No markdown. No comments. No backticks. No extra text.\",\n  \"Return exactly one JSON object with ONLY allowed keys.\",\n  lastErr ? `Previous error: ${lastErr}` : \"\",\n  \"If you are unsure, still output valid JSON that matches the schema.\"\n].filter(Boolean).join(\"\\n\");\n\nconst llm_system = `${repair}\\n\\n${String(j.llm_system ?? \"\").trim()}`.trim();\n\n// Also add a short reminder to user message\nconst llm_user = `${String(j.llm_user ?? \"\").trim()}\\n\\nREMINDER: Output JSON only.`.trim();\n\nreturn {\n  json: {\n    ...j,\n    llm_try,\n    llm_system,\n    llm_user\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3328,
+        80
+      ],
+      "id": "e52290c2-a604-4f6f-951b-bec87638e771",
+      "name": "Inc try + tweak prompt"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const maxTry = 2;\n\nconst llm_try = Number.isInteger($json.llm_try) ? $json.llm_try : 0;\n\nreturn {\n  json: {\n    ...$json,\n    llm_try,\n    llm_max_try: maxTry,\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        -192
+      ],
+      "id": "53e923a0-c022-4587-9a64-173a038ce2d6",
+      "name": "Set llm_try & llm_max_try"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.intel_events\nset\n  status = 'error',\n  payload = coalesce(payload, '{}'::jsonb) ||\n    jsonb_build_object(\n      'llm_ok', false,\n      'llm_error', $2,\n      'llm_try', $3,\n      'llm_raw', $4,\n      'updated_at', now()\n    ),\n  last_seen_at = now()\nwhere event_id = $1\nreturning event_id, status;",
+        "options": {
+          "queryReplacement": "={{ [\n    $json.event_id,\n    String($json.llm_error || $json.error || ''),\n    Number($json.llm_try ?? 0),\n    String($json.llm_raw || '')\n  ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3056,
+        96
+      ],
+      "id": "7a3f85b1-c33c-42db-ac4a-bd397ec6b543",
+      "name": "DB: mark error",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.intel_events\nset\n  status = 'classified',\n  category = $3,\n  priority = $4,\n  confidence = $5,\n  tags = $6::jsonb,\n  evidence = $7::jsonb,\n  suggested_action = $8,\n  draft_reply = $9,\n  payload = coalesce(payload, '{}'::jsonb) ||\n    jsonb_build_object(\n      'llm_ok', true,\n      'llm_try', $10::int,\n      'classified_at', now(),\n      'should_alert', $2\n    ),\n  last_seen_at = now()\nwhere event_id = $1::uuid\nreturning event_id, status;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.event_id,\n  Boolean($json.should_alert),\n  String($json.category),\n  Number($json.priority),\n  Number($json.confidence),\n  JSON.stringify($json.tags ?? []),\n  JSON.stringify($json.evidence ?? []),\n  String($json.suggested_action ?? ''),\n  $json.draft_reply ?? null,\n  Number($json.llm_try ?? 0)\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3072,
+        -160
+      ],
+      "id": "87896ba9-3cf3-4514-8bd8-57024ffd77a8",
+      "name": "DB: mark classified",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "081a2dd3-4284-4f8e-ac67-df3a470a9db2",
+              "leftValue": "={{$json.llm_max_try > $json.llm_try}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2896,
+        0
+      ],
+      "id": "93272967-0f62-4dd4-a070-76734cf10d23",
+      "name": "If llm_max_try > llm_try"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2080,
+        -176
+      ],
+      "id": "0f18696b-8850-4e40-bb06-5ef3ff2642db",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare payload for DB — Run Once for Each Item\n// Goal: ensure payload contains original meta (kb_ref/url_list/source_url/author/source)\n// and classification result (category/priority/confidence/tags/evidence/should_alert)\n\nconst j = $json;\n\nconst payload0 = (j.payload && typeof j.payload === \"object\" && !Array.isArray(j.payload))\n  ? j.payload\n  : {};\n\nconst text_for_llm = String(payload0.text_for_llm ?? j.text ?? \"\").trim();\n\nconst url_list = Array.isArray(payload0.url_list)\n  ? payload0.url_list\n  : (Array.isArray(j.url_list) ? j.url_list : []);\n\nconst source_url = String(payload0.source_url ?? j.source_url ?? \"\").trim();\nconst kb_ref = String(payload0.kb_ref ?? j.kb_ref ?? \"ceo_x_demo\").trim();\n\nconst author = String(payload0.author ?? j.author ?? \"\").trim();\nconst source = String(payload0.source ?? j.source ?? \"\").trim();\n\n// classification fields are already validated in previous node\nconst classification = {\n  category: j.category,\n  priority: j.priority,\n  confidence: j.confidence,\n  tags: Array.isArray(j.tags) ? j.tags : [],\n  evidence: Array.isArray(j.evidence) ? j.evidence : [],\n  evidence_base: Array.isArray(j.evidence_base) ? j.evidence_base : [],\n  suggested_action: String(j.suggested_action ?? \"\").trim(),\n  should_alert: Boolean(j.should_alert),\n};\n\nconst payload1 = {\n  ...payload0,\n  text_for_llm,\n  kb_ref,\n  url_list,\n  source_url,\n  author,\n  source,\n  classification,\n};\n\nreturn [{\n  json: {\n    ...j,\n    payload: payload1,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        -272
+      ],
+      "id": "12183cc7-716c-4e42-811c-309dba32cfbe",
+      "name": "Prepare payload for DB"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3264,
+        -256
+      ],
+      "id": "30700c0c-b674-4ffc-8a77-48fc3ce3fccb",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1636b790-d206-4c1b-bd64-a86c58c190eb",
+              "leftValue": "={{$json.should_alert}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3472,
+        -256
+      ],
+      "id": "19b45b92-a09d-44e8-af37-1b0853c8a128",
+      "name": "IF: Should Alert"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.alerts_sent (event_id, chat_id)\nvalues ($1::uuid, $2::bigint)\non conflict (event_id, chat_id) do nothing\nreturning id;\n",
+        "options": {
+          "queryReplacement": "={{$json.event_id}}, {{$json.chat_id}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3792,
+        -272
+      ],
+      "id": "50b9da92-93f3-4430-a21f-06d6a633fa19",
+      "name": "Postgres: Insert alerts_sent (dedup)",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9267ef29-f6c9-4e70-88e6-f9d6b3331466",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4176,
+        -384
+      ],
+      "id": "3624f451-f3b5-436c-97f3-ffaca4af78e3",
+      "name": "IF: Inserted?"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ `🚨 RISK ALERT (P${$json.classification?.priority ?? $json.priority ?? '?'} / ${Math.round((($json.classification?.confidence ?? $json.confidence ?? 0)*100))}%)\n\n${(typeof ($json.classification?.summary ?? $json.summary) === 'string'\n  ? ($json.classification?.summary ?? $json.summary)\n  : ($json.payload?.text_for_llm ?? $json.text_for_llm ?? $json.canonical_text ?? ''))}\n\nEvidence:\n- ${($json.classification?.evidence?.[0] ?? $json.evidence?.[0] ?? 'n/a')}` }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4384,
+        -480
+      ],
+      "id": "19d5723d-6edb-42ce-8209-736976d305c1",
+      "name": "Telegram SendMessage: ALERT",
+      "webhookId": "1b3c5b92-cbb8-4d4d-8357-c8357bc0e187",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3968,
+        -384
+      ],
+      "id": "1f63eb1b-976f-48f1-a1c9-2625942488b5",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "99570ac4-78c8-41cf-93d8-959818500b7e",
+              "leftValue": "={{ $json.suppress_reply !== true && $json.silent !== true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3648,
+        -64
+      ],
+      "id": "24ae2a32-97da-4ce0-8482-c6270dd0f67c",
+      "name": "If Should ACK?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cat = $json.category || $json.classification?.category || 'NARRATIVE';\nconst pr = $json.priority ?? $json.classification?.priority;\nconst conf = $json.confidence ?? $json.classification?.confidence;\n\nconst confPct = (typeof conf === 'number') ? `${Math.round(conf * 100)}%` : null;\nconst prTxt = (typeof pr === 'number') ? `P${pr}` : null;\n\nconst meta = [cat, prTxt, confPct].filter(Boolean).join(' / ');\n\nreturn [{\n  ...$json,\n  ack_text: `✅ Saved. No immediate risk detected.\\n(${meta})`,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3872,
+        -80
+      ],
+      "id": "b28710c5-a4b0-4824-820d-e9843dd94f56",
+      "name": "Build ACK text"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{$json.ack_text}}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4080,
+        -80
+      ],
+      "id": "e8bd4e47-b652-4648-8020-62eb75147e44",
+      "name": "Telegram SendMessage: ACK",
+      "webhookId": "1b3c5b92-cbb8-4d4d-8357-c8357bc0e187",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Load intel_event by id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load intel_event by id": {
+      "main": [
+        [
+          {
+            "node": "IF status is new?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF status is new?": {
+      "main": [
+        [
+          {
+            "node": "Build LLM prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM prompt": {
+      "main": [
+        [
+          {
+            "node": "IF “has_text?”",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM classify": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "If llm_max_try > llm_try",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF “has_text?”": {
+      "main": [
+        [
+          {
+            "node": "Set llm_try & llm_max_try",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse/Validate JSON": {
+      "main": [
+        [
+          {
+            "node": "If llm_ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If llm_ok?": {
+      "main": [
+        [
+          {
+            "node": "Prepare payload for DB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If llm_max_try > llm_try",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inc try + tweak prompt": {
+      "main": [
+        [
+          {
+            "node": "LLM classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set llm_try & llm_max_try": {
+      "main": [
+        [
+          {
+            "node": "LLM classify",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If llm_max_try > llm_try": {
+      "main": [
+        [
+          {
+            "node": "Inc try + tweak prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: mark error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Parse/Validate JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare payload for DB": {
+      "main": [
+        [
+          {
+            "node": "DB: mark classified",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: mark classified": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "IF: Should Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Should Alert": {
+      "main": [
+        [
+          {
+            "node": "Postgres: Insert alerts_sent (dedup)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If Should ACK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres: Insert alerts_sent (dedup)": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "IF: Inserted?": {
+      "main": [
+        [
+          {
+            "node": "Telegram SendMessage: ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "IF: Inserted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Should ACK?": {
+      "main": [
+        [
+          {
+            "node": "Build ACK text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build ACK text": {
+      "main": [
+        [
+          {
+            "node": "Telegram SendMessage: ACK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "0bd74333-c31e-4218-b62e-c9dec583afd3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "M8iBfMfxQ9xt2gbfGW4D3",
+  "tags": []
+}

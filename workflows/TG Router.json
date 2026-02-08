@@ -1,0 +1,870 @@
+{
+  "name": "TG Router",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        -176
+      ],
+      "id": "ca3fa049-5483-466e-a158-64044325b93a",
+      "name": "Telegram Trigger",
+      "webhookId": "46f42494-c90c-4bdf-baeb-c96334bb12ee",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.message || {};\nconst chat = msg.chat || {};\nconst text = msg.text || '';\n\nlet command = null;\nlet args = '';\n\nif (text.startsWith('/')) {\n  const firstSpace = text.indexOf(' ');\n  if (firstSpace === -1) {\n    command = text;\n    args = '';\n  } else {\n    command = text.slice(0, firstSpace);\n    args = text.slice(firstSpace + 1).trim();\n  }\n}\n\nreturn [\n  {\n    update_id: $json.update_id,\n    chat_id: chat.id,\n    from_id: msg.from?.id,\n    text,\n    command,   // например \"/invite\" или \"/start\"\n    args,      // всё после команды\n    raw: $json // на всякий случай для дебага\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        -64
+      ],
+      "id": "4b8abb18-dcc8-4fbd-8740-365df65de64d",
+      "name": "Normalize input"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4533aabd-4928-4483-bdc3-236692416c7b",
+              "leftValue": "={{$items().length > 0 && $json.is_active === true}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1840,
+        528
+      ],
+      "id": "5c16c4b2-f92a-407f-bf88-9c29d1b8f827",
+      "name": "IF “allowed?”"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  coalesce(\n    (select role from public.whitelist where chat_id = {{$json.chat_id}}),\n    'guest'\n  ) as role,\n  coalesce(\n    (select is_active from public.whitelist where chat_id = {{$json.chat_id}}),\n    false\n  ) as is_active;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1456,
+        544
+      ],
+      "id": "89614282-4127-4b99-bac7-b050fa87e925",
+      "name": "Load whitelist",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = String($json.text ?? '').trim();        // что ввёл юзер\nconst firstLine = raw.split('\\n')[0].trim();        // команда только из первой строки\n\nlet command = null;\nlet args = '';\n\nif (firstLine.startsWith('/')) {\n  const first = firstLine.split(/\\s+/)[0] || '';    // \"/start\" или \"/start@BotName\"\n  command = first.split('@')[0].toLowerCase();      // нормализуем\n  args = raw.slice(first.length).trim();            // всё после команды (может быть много строк)\n}\n\nreturn [{\n  json: {\n    ...$json,\n    command,\n    args,\n    text: raw,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        -64
+      ],
+      "id": "37e6a729-26b5-4f5c-8bf3-514c44d04fb1",
+      "name": "Route command"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.command}}",
+                    "rightValue": "/invite",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "c0f46a24-fb73-4753-bd49-7bb14349734f"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/invite"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9d1cfa76-60cc-4080-a0f7-9c2291fa66a2",
+                    "leftValue": "={{$json.command}}",
+                    "rightValue": "/start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/start"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a3463da7-fcad-484e-9d75-00c0e22592a5",
+                    "leftValue": "={{$json.command}}",
+                    "rightValue": "/help",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/help"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "3a60609d-8db9-45e2-935b-76808263b33b",
+                    "leftValue": "={{$json.command}}",
+                    "rightValue": "/demo",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/demo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e604ee62-5a58-4a46-8510-c9e38acba7ac",
+                    "leftValue": "={{$json.command}}",
+                    "rightValue": "/digest",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/digest"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a268bc6d-52c5-460b-89b8-5cc6bdf9ca33",
+                    "leftValue": "",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "default"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1280,
+        -96
+      ],
+      "id": "aaa5266f-8cdf-4004-831c-ce02c52d1cc0",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1648,
+        528
+      ],
+      "id": "dcd16c09-c2ff-4345-a5e1-9e7d80c87124",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Switch').item.json.chat_id }}",
+        "text": "🔒 Access by invite only",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2064,
+        624
+      ],
+      "id": "fbc7c25a-668b-415d-9365-342c2fa6e9a2",
+      "name": "🔒 Access by invite only",
+      "webhookId": "96831571-33a4-4848-a7e2-fd048c356c5c",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.reply_text }}",
+        "replyMarkup": "={{$json.reply_markup}}",
+        "forceReply": {},
+        "replyKeyboardOptions": {},
+        "replyKeyboardRemove": {},
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "={{$json.parse_mode || null}}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2032,
+        -192
+      ],
+      "id": "b78f3b71-873a-4c4a-bb7e-957f4ae8c533",
+      "name": "Send a text message",
+      "webhookId": "1302a5be-10d3-46ca-9b42-2072360e8774",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "GYoq9FiqsSuKTTJXElkIr",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/GYoq9FiqsSuKTTJXElkIr",
+          "cachedResultName": "SUB WF Invite Create"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1712,
+        -576
+      ],
+      "id": "2d1974a3-a8c7-49de-850d-6e0efdd730d2",
+      "name": "Call 'SUB WF Invite Create'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "k4xO7rrHHzdXVlN7",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/k4xO7rrHHzdXVlN7",
+          "cachedResultName": "SUB WF Start Redeem"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "chat_id": 0
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "chat_id",
+              "displayName": "chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1712,
+        -400
+      ],
+      "id": "3f365acc-ab8b-4400-ac2a-fcd7323d1686",
+      "name": "Call 'SUB WF Start Redeem"
+    },
+    {
+      "parameters": {
+        "jsCode": "const lines = [];\n\nlines.push(\"🧭 <b>Market Screener — Help</b>\");\nlines.push(\"\");\nlines.push(\"✅ <b>How to use</b>\");\nlines.push(\"• Send the <b>post text</b> (copy/paste).\");\nlines.push(\"• Link-only messages are not processed (scraping is disabled in this demo).\");\nlines.push(\"\");\nlines.push(\"▶️ <b>Access</b>\");\nlines.push(\"• <code>/start &lt;token&gt;</code> — redeem an invite token (provided by admin).\");\nlines.push(\"\");\nlines.push(\"🧪 <b>Examples</b>\");\nlines.push(\"<code>Rumor: Project X is preparing a listing. Source: ...</code>\");\nlines.push(\"<code>https://x.com/... (optional, as a second line)</code>\");\nlines.push(\"\");\nlines.push(\"ℹ️ Commands: <code>/start</code>, <code>/help</code>\");\n\nreturn [{\n  json: {\n    ...$json,\n    ok: true,\n    reply_text: lines.join(\"\\n\"),\n    parse_mode: \"HTML\",\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -224
+      ],
+      "id": "dc94ff4a-ba25-432c-8b56-bcf71846166c",
+      "name": "Build help reply"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Works regardless of \"Run once for each item\" / \"Run once for all items\"\nreturn $input.all().map((item) => {\n  const j = item.json || {};\n  const raw = j.raw ?? {};\n  const msg = raw.message ?? {};\n\n  const chat_id = j.chat_id ?? msg.chat?.id ?? raw.chat_id;\n  const user_id = j.from_id ?? msg.from?.id ?? raw.from?.id;\n  const message_id = msg.message_id ?? j.message_id ?? raw.message_id;\n\n  const text = String(\n    j.text ??\n    msg.text ??\n    msg.caption ??\n    ''\n  ).trim();\n\n  const trace_id = j.trace_id || `${chat_id}:${message_id}:${Date.now()}`;\n\n  return {\n    json: {\n      chat_id,\n      user_id,\n      message_id,\n      text,\n      trace_id,\n      kb_ref: j.kb_ref || \"ceo_x_demo\",\n      source: \"telegram\",\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        432
+      ],
+      "id": "577fb5cb-89d9-44ef-b16f-77808a2b911b",
+      "name": "Prepare payload"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "LkxuaYPljk3at-ddPo15B",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/LkxuaYPljk3at-ddPo15B",
+          "cachedResultName": "SUB WF Demo Run"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1712,
+        48
+      ],
+      "id": "ee7e9aeb-3391-49c7-87f9-1a36fdd4af1e",
+      "name": "Call 'SUB WF Demo Run'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "efbd905f-7c19-439f-9a14-017096124ec0",
+              "leftValue": "={{ !!$json.callback_query }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        624,
+        -176
+      ],
+      "id": "d718beb3-a258-4e33-ad47-89a86b383c58",
+      "name": "IF: is_callback"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "iggfosJhUEd1u7j9V5Tio",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/iggfosJhUEd1u7j9V5Tio",
+          "cachedResultName": "SUB WF Callback Router"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        832,
+        -272
+      ],
+      "id": "72da0c0b-fc76-4622-bb49-f77af9c93a86",
+      "name": "Call 'SUB WF Callback Router'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "WV0FSDYwRyY9WHMz2f2F4",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/WV0FSDYwRyY9WHMz2f2F4",
+          "cachedResultName": "SUB WF Inbox Ingest"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2256,
+        432
+      ],
+      "id": "0d4c3b19-d50c-4f8b-b687-1d63844572c1",
+      "name": "Call 'SUB WF Inbox Ingest'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NqJdboe-hm7vhbTTA8gH-",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NqJdboe-hm7vhbTTA8gH-",
+          "cachedResultName": "SUB WF Digest"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1712,
+        208
+      ],
+      "id": "95c26469-df96-48b6-834f-efb629f39fdd",
+      "name": "Call 'SUB WF Digest'"
+    },
+    {
+      "parameters": {
+        "jsCode": "// TG Router -> /demo branch -> Code node \"Demo ack\"\nconst j = $json;\n\n// try to resolve chat_id to keep payload consistent downstream (optional)\nconst chat_id =\n  j.chat_id ??\n  j.tg_chat_id ??\n  j.raw?.message?.chat?.id ??\n  j.message?.chat?.id ??\n  j.chat?.id ??\n  null;\n\n// If you know the count here, set it. Otherwise default to 10.\nconst demo_count = Number.isFinite(Number(j.demo_count)) ? Number(j.demo_count) : 10;\n\nreturn [{\n  json: {\n    ...j,\n    chat_id, // keep for convenience; TG SendMessage can use this if needed\n    reply_text: `⏳ Loading demo feed…`,\n    reply_markup: null,\n    parse_mode: null, // plain text\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -80
+      ],
+      "id": "5a6fe06e-88e3-405b-9859-b2b217304501",
+      "name": "Loading"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "IF: is_callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize input": {
+      "main": [
+        [
+          {
+            "node": "Route command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load whitelist": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "IF “allowed?”": {
+      "main": [
+        [
+          {
+            "node": "Prepare payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔒 Access by invite only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route command": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Call 'SUB WF Invite Create'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 'SUB WF Start Redeem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build help reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 'SUB WF Demo Run'",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Loading",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 'SUB WF Digest'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load whitelist",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "IF “allowed?”",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'SUB WF Invite Create'": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'SUB WF Start Redeem": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build help reply": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare payload": {
+      "main": [
+        [
+          {
+            "node": "Call 'SUB WF Inbox Ingest'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'SUB WF Demo Run'": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: is_callback": {
+      "main": [
+        [
+          {
+            "node": "Call 'SUB WF Callback Router'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalize input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'SUB WF Inbox Ingest'": {
+      "main": [
+        []
+      ]
+    },
+    "Call 'SUB WF Digest'": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loading": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "b4b1c6a1-6b3c-49dc-8d52-6b2815b6506c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "rsRkUq6HofwOD63qM72wr",
+  "tags": []
+}

@@ -1,0 +1,219 @@
+{
+  "name": "SUB WF Invite Create",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "chat_id",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -16,
+        0
+      ],
+      "id": "3af666a3-f49c-4d15-812f-e736d89e2291",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3b279e97-3d85-482d-bb8e-335fe4e22bf5",
+              "leftValue": "={{$json.role === 'admin'}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "e50badbe-421e-475e-86f7-bf87009c528b",
+      "name": "IF role is 'admin'"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ ok: false, reply_text: '⛔️ Admin only.' }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        96
+      ],
+      "id": "590cc55a-9d79-4d6d-b79c-ebb80871d969",
+      "name": "Return admin only"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst token = crypto.randomBytes(24).toString('hex');\nconst token_hash = crypto.createHash('sha256').update(token).digest('hex');\n\nreturn [{ ...$json, token, token_hash }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        -128
+      ],
+      "id": "5975c185-0ea5-4b12-a9b8-57ce452ace13",
+      "name": "Make token"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.invite_tokens (token_hash, expires_at)\nvalues (cast('{{$json.token_hash}}' as text), now() + interval '7 days')\nreturning expires_at;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        800,
+        -272
+      ],
+      "id": "388c1d5c-2b92-4be7-9b9f-201a60dc15e2",
+      "name": "Insert invite",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  ok: true,\n  reply_text: `✅ Invite token (valid 7 days)\\nSend:\\n/start ${$json.token}`,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        -128
+      ],
+      "id": "ab69154e-20b1-43cd-b5a7-e4530da8b4bb",
+      "name": "Build reply"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select role\nfrom public.whitelist\nwhere chat_id = $1\n  and is_active = true\nlimit 1;",
+        "options": {
+          "queryReplacement": "={{$json.chat_id}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        192,
+        0
+      ],
+      "id": "b6daaab0-31eb-4914-a99d-5a4b2c4454f8",
+      "name": "Get Role",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get Role",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF role is 'admin'": {
+      "main": [
+        [
+          {
+            "node": "Make token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return admin only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make token": {
+      "main": [
+        [
+          {
+            "node": "Insert invite",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert invite": {
+      "main": [
+        []
+      ]
+    },
+    "Get Role": {
+      "main": [
+        [
+          {
+            "node": "IF role is 'admin'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "12b9006e-e20a-4269-8821-87d106d66b69",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "GYoq9FiqsSuKTTJXElkIr",
+  "tags": []
+}

@@ -1,0 +1,145 @@
+{
+  "name": "SUB WF Demo Run",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "WV0FSDYwRyY9WHMz2f2F4",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/WV0FSDYwRyY9WHMz2f2F4",
+          "cachedResultName": "SUB WF Inbox Ingest"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -208,
+        16
+      ],
+      "id": "858eb84c-5449-4b1a-818b-7a6964622b1b",
+      "name": "Call 'SUB WF Inbox Ingest'"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -880,
+        16
+      ],
+      "id": "b9ce1073-4853-4558-9508-a44625fc92db",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\n\n// chat/user берем из твоего нормализованного входа роутера\nconst chat_id = j.chat_id ?? j.tg_chat_id ?? j.raw?.message?.chat?.id;\nconst user_id = j.from_id ?? j.user_id ?? j.tg_user_id ?? j.raw?.message?.from?.id;\nconst message_id = j.raw?.message?.message_id ?? j.message_id ?? 0;\n\n// kb_ref: выбери фиксированный для демо (важно чтобы /digest смотрел туда же)\nconst kb_ref = j.kb_ref ?? \"ceo_x_demo\";\n\nif (!chat_id || !user_id) {\n  return [{\n    json: {\n      ok: false,\n      reply_text: \"Cannot run demo: chat_id/user_id is missing.\",\n      parse_mode: \"HTML\",\n    }\n  }];\n}\n\nconst demo_batch = new Date().toISOString();\nconst batchKey = demo_batch.replace(/[^0-9]/g, \"\").slice(0, 14);\nconst trace_id = `demo_${chat_id}_${user_id}_${batchKey}`;\n\nreturn [{\n  json: {\n    ok: true,\n\n    // REQUIRED base fields for downstream\n    chat_id,\n    user_id,\n    message_id,   // это id сообщения /demo; далее в items будет свой message_id\n    kb_ref,\n    trace_id,\n\n    // demo meta\n    demo_batch,\n\n    // IMPORTANT: mute downstream replies during demo ingestion\n    silent: true,           // <-- добавили\n    suppress_reply: true,   // оставляем твой флаг, чтобы не ломать текущие проверки\n\n    // можно сохранить исходник (не обязательно)\n    raw: j.raw ?? null,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        16
+      ],
+      "id": "0951d647-26c3-4b9e-a056-58bd9b9d2384",
+      "name": "Init demo batch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = items[0]?.json ?? {};\n\nconst chat_id = base.chat_id ?? base.tg_chat_id;\nconst user_id = base.user_id ?? base.tg_user_id;\nconst kb_ref  = base.kb_ref ?? \"ceo_x_demo\";\n\nconst demo_batch = base.demo_batch ?? new Date().toISOString();\nconst batchKey = demo_batch.replace(/[^0-9]/g, \"\").slice(0, 14);\n\n// message_id должен быть bigint (число)\nconst base_message_id = Number(base.message_id ?? 1000000);\n\n// trace_id — строка\nconst base_trace = base.trace_id ?? `demo_${chat_id}_${user_id}_${batchKey}`;\n\n// IMPORTANT: inherit silent from base (default true for demo)\nconst silent = base.silent !== false; // если вдруг кто-то явно передаст false — уважим\n\n// Source (same handle for all demo items)\nconst profile_url = \"https://x.com/Altsteinn\";\nconst author = \"Altsteinn\";\n\nconst demoPosts = [\n  // 1) LISTING_RUMOR\n  {\n    text: \"Hearing $SACHI listing is being discussed for a Tier-1 (Binance/OKX) — not confirmed yet.\\n\\nIf this gets announced, it's a volume magnet. Keep size small until official post.\",\n    url: `$preloaded#demo-1`\n  },\n\n  // 2) LISTING_RUMOR\n  {\n    text: \"Rumor: $BNKR is on the shortlist for Bybit spot listing next week.\\n\\nNo official announcement. If you trade this, treat it as a rumor play.\",\n    url: `preloaded#demo-2`\n  },\n\n  // 3) NOISE\n  {\n    text: \"gm 🫡\\n\\nmarket is cooking or we're cooked — either way I'm here for the drama 🍿\",\n    url: `preloaded#demo-3`\n  },\n\n  // 4) RISK_FUD\n  {\n    text: \"🚨 RISK: multiple reports of withdrawals delayed + wallet draining claims around $EPSTEIN.\\n\\nIf you're in, consider exiting until team publishes a clear statement + onchain proof. This can go to zero fast.\",\n    url: `preloaded#demo-4`\n  },\n\n  // 5) NOISE\n  {\n    text: \"If you’re buying because someone posted '10x soon' — just log off.\\n\\nTouch grass, come back with a plan.\",\n    url: `preloaded#demo-5`\n  },\n\n  // дальше без изменений\n  {\n    text: \"you're really going to take advice from the same influencers that got wiped by the crash? they're no better than you tbh\\n\\ntake it from ME that caught the BTC short at $90k and the ETH short at $3.3k\\n\\nwe need levels around $75k to confirm the reversal\\n\\n[200 likes gets chart]\",\n    url: `preloaded#demo-6`\n  },\n  {\n    text: \"Altcoins just broke a 4.5-year downtrend vs Bitcoin 🚨\\n\\nevery rally since 2021 failed with lower highs. $BTC dominance was untouchable, but now that structure is broken\\n\\ncapital is rotating WITHIN crypto, not exiting... Whatever happens next, volatility is guaranteed\\n\\nstay positioned, we are about to witness history in 2026\",\n    url: \"https://x.com/deg_ape/status/2020422247417278896\",\n    author: \"Mr. APE aka GEM Hunter\"\n  },\n  {\n    text: \"$Whalentime Update 🚨\\n\\nPrice is consolidating before the next upside leg. Our bags are already 2x...\\n\\nI see dev is active, organizing spaces, AMAs and giveaways...\\n\\nHeard theres 5 SOL giveaway in today's Pumpfun Live at 6:30pm EST. Don't miss it.\\n\\nIts a million dollar valentine meta in 2026\\nwe are still early 🔥\",\n    url: \"https://x.com/deg_ape/status/2019792629500965359\",\n    author: \"Mr. APE aka GEM Hunter\"\n  },\n  {\n    text: \"survival is the alpha\\n\\n$BIGTROUT just pulled a 2x while everything else lost half its value\\n\\n$3M --> $6M\\n\\nBigtrout is still active and pushing hard with the community. This is what separated money looks like.\",\n    url: \"https://x.com/deg_ape/status/2019693890635460641\",\n    author: \"Mr. APE aka GEM Hunter\"\n  },\n  {\n    text: \"study this relative strength in $WhiteWhale\\n\\nyou could've printed an easy 5X if you aped with me at the $30M bottom...\\n\\nSome memes overcome FUD and show strength.\\nOthers just scramble down with market volatility\\n\\nLearn to spot the difference early\\n\\nI'm holding every single #WhiteWhale token\\n\\nSee you at ATH 😉\",\n    url: \"https://x.com/deg_ape/status/2019440569635016784\",\n    author: \"Mr. APE aka GEM Hunter\"\n  }\n];\n\nif (!chat_id || !user_id) {\n  return [{\n    json: { ok: false, reply_text: \"ERR missing: chat_id/user_id\", parse_mode: \"HTML\" }\n  }];\n}\n\nreturn demoPosts.map((p, idx) => {\n  const n = idx + 1;\n  const postAuthor = p.author ?? author;\n  const postUrl = p.url ?? profile_url;\n\n  return {\n    json: {\n      // required\n      chat_id,\n      user_id,\n      kb_ref,\n      message_id: base_message_id + n,\n      trace_id: `${base_trace}_${n}`,\n\n      // content\n      text: p.text,\n\n      // evidence/source meta\n      url_list: [postUrl],\n      author: postAuthor,\n      source_url: postUrl,\n\n      // flags\n      is_demo: true,\n      demo_batch,\n      demo_index: n,\n\n      // IMPORTANT: mute downstream replies during demo ingestion\n      silent,               // <-- добавили\n      suppress_reply: true, // оставляем, если где-то уже проверяется\n      source: \"demo\"        // <-- единое значение для логов\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        16
+      ],
+      "id": "cc90a3ec-f78f-4dde-9ec3-d6ef6ac843c8",
+      "name": "Build demo items"
+    },
+    {
+      "parameters": {
+        "jsCode": "const first = items[0]?.json ?? {};\nconst batch = first.demo_batch ? `\\nBatch: ${first.demo_batch}` : \"\";\n\nreturn [{\n  json: {\n    ok: true,\n    reply_text: `✅ Demo feed submitted (10 items).${batch}\\nSend /digest to view summary.`,\n    parse_mode: \"HTML\",\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        16
+      ],
+      "id": "9fa9f7c0-914a-4d5c-96d5-387c2fb0ba85",
+      "name": "Final reply"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Call 'SUB WF Inbox Ingest'": {
+      "main": [
+        [
+          {
+            "node": "Final reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Init demo batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init demo batch": {
+      "main": [
+        [
+          {
+            "node": "Build demo items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build demo items": {
+      "main": [
+        [
+          {
+            "node": "Call 'SUB WF Inbox Ingest'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "99dfe55e-debe-4e19-827f-aac0e60a08ff",
+  "meta": {
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "LkxuaYPljk3at-ddPo15B",
+  "tags": []
+}

@@ -1,0 +1,449 @@
+{
+  "name": "SUB WF Callback Router",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6483352f-c20a-48b4-abe9-1d49eb2fafc2",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "function fail(msg) {\n  return [{\n    json: {\n      ok: false,\n      err: msg, // НЕ \"error\"\n    }\n  }];\n}\n\nconst cq = $json?.callback_query;\nif (!cq?.data) return fail(\"No callback_query.data\");\n\nconst data = String(cq.data).trim();\n// ожидаем ms:v1:<action>:<event_id>\nconst parts = data.split(\":\");\nif (parts.length < 4) return fail(\"Bad callback_data (need ms:v1:<action>:<event_id>)\");\n\nconst [ns, ver, action, ...rest] = parts;\nconst event_id = rest.join(\":\"); // на случай если дальше тоже будут ':'\n\nif (ns !== \"ms\" || ver !== \"v1\") return fail(\"Bad namespace/version\");\nif (![\"details\", \"back\"].includes(action)) return fail(`Unsupported action: ${action}`);\nif (!event_id) return fail(\"Missing event_id\");\n\nconst chat_id = cq.message?.chat?.id ?? null;\nconst message_id = cq.message?.message_id ?? null;\n\nif (!chat_id || !message_id) return fail(\"Missing chat_id/message_id in callback_query.message\");\n\nreturn [{\n  json: {\n    ok: true,\n    action,\n    event_id,\n    chat_id,\n    message_id,\n    callback_query_id: cq.id, // нужно для answerCallbackQuery\n    callback_data: data,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "8eed2a79-5bc7-4f5b-b350-11401e13c380",
+      "name": "Parse + Normalize"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ff579b28-9678-4d06-ac07-0143a9af1d78",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "a95c3608-a518-42a9-9164-a66459dce6c5",
+      "name": "IF: ok?"
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $json.callback_query?.id || $json.callback_query_id }}",
+        "additionalFields": {
+          "show_alert": false,
+          "text": "Invalid button"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        624,
+        176
+      ],
+      "id": "bcd719fc-30a1-4064-8300-4d87fb77432a",
+      "name": "Answer Callback Query (ошибка)",
+      "webhookId": "da90b81f-9e68-4001-b42e-817f22160715",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $json.callback_query_id }}",
+        "additionalFields": {
+          "show_alert": false,
+          "text": "={{ $json.action === \"details\" ? \"Opening details\" : \"OK\" }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        624,
+        -224
+      ],
+      "id": "23e7178d-5696-4262-a775-8c3265e28114",
+      "name": "Answer Query a callback",
+      "webhookId": "da90b81f-9e68-4001-b42e-817f22160715",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  event_id,\n  chat_id,\n  status,\n  source,\n  text,\n  source_url_canonical,\n  category,\n  priority,\n  confidence,\n  suggested_action,\n  evidence\nfrom public.intel_events\nwhere event_id = $1::uuid\nlimit 1;",
+        "options": {
+          "queryReplacement": "={{ $json.event_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        944,
+        -16
+      ],
+      "id": "879ca532-bb6b-4af9-9e9c-3a7f7dbd4fc2",
+      "name": "Postgres: Load intel_event",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = Array.isArray($json) ? $json[0] : $json;\n\nlet evidence = row?.evidence ?? [];\nif (typeof evidence === \"string\") {\n  try { evidence = JSON.parse(evidence); } catch {}\n}\nif (!Array.isArray(evidence)) evidence = [];\n\nconst esc = (s) =>\n  String(s ?? \"\")\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n\nconst cat = row?.category ?? \"UNKNOWN\";\nconst pr = row?.priority ?? \"?\";\nconst confNum =\n  typeof row?.confidence === \"number\" ? row.confidence :\n  (row?.confidence != null ? Number(row.confidence) : null);\nconst confTxt = Number.isFinite(confNum) ? `${(confNum * 100).toFixed(0)}%` : \"—\";\n\nconst lines = [];\nlines.push(`<b>Details</b>`);\nlines.push(`<b>${esc(cat)}</b> • P${esc(pr)} • <b>Confidence:</b> ${esc(confTxt)}`);\n\nconst original = row?.text ? String(row.text) : \"\";\nif (original) {\n  lines.push(\"\");\n  lines.push(\"<b>Original</b>\");\n  lines.push(esc(original.slice(0, 600))); // ограничим длину\n}\n\nconst ev = evidence\n  .slice(0, 3)\n  .map(x => `• ${esc(String(x).slice(0, 240))}`)\n  .join(\"\\n\");\n\nif (ev) {\n  lines.push(\"\");\n  lines.push(\"<b>Evidence</b>\");\n  lines.push(ev);\n}\n\nconst src = row?.source_url_canonical;\nif (src) {\n  lines.push(\"\");\n  lines.push(\"<b>Source</b>\");\n  lines.push(esc(src));\n} else if (row?.source) {\n  lines.push(\"\");\n  lines.push(\"<b>Source</b>\");\n  lines.push(esc(row.source));\n}\n\nif (row?.suggested_action) {\n  lines.push(\"\");\n  lines.push(`<b>Next</b> ${esc(row.suggested_action)}`);\n}\n\nreturn [{\n  json: {\n    ok: true,\n    chat_id: $json.chat_id,\n    message_id: $json.message_id,\n    event_id: $json.event_id,\n    parse_mode: \"HTML\",\n    text: lines.join(\"\\n\"),\n    // новая клавиатура на details\n    reply_markup: {\n      inline_keyboard: [\n        [{ text: \"⬅ Back\", callback_data: `ms:v1:back:${$json.event_id}` }],\n        [{ text: \"✅ Viewed\", callback_data: `ms:v1:viewed:${$json.event_id}` }]\n      ]\n    }\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -128
+      ],
+      "id": "31a34410-aa2d-4d4b-acf4-df5197a5c6fe",
+      "name": "Build details text"
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chat_id }}",
+        "messageId": "={{ $json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "={{ $json.text }}",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "⬅ Back",
+                    "additionalFields": {
+                      "callback_data": "={{ `ms:v1:back:${$json.event_id}` }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1744,
+        -128
+      ],
+      "id": "9c677378-eb72-46be-b943-8ee98f7b852c",
+      "name": "Edit Message Text",
+      "webhookId": "e0fcac80-754e-4769-8fa4-cfc7f59825ea",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ...$json,\n    cb: {\n      chat_id: $json.chat_id,\n      message_id: $json.message_id,\n      event_id: $json.event_id,\n      action: $json.action\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        -16
+      ],
+      "id": "49c2ecad-ae96-42d8-bb2f-7a5dd0cfdffa",
+      "name": "Stash callback meta"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = Array.isArray($json) ? $json[0] : $json;\n\n// Забираем \"входной\" item из предыдущей ноды (stash)\nconst stash = $('Stash callback meta').item.json;  // <-- имя ноды ровно как у тебя\nconst cb = stash.cb || {};\n\nreturn [{\n  json: {\n    ...row,\n    chat_id: cb.chat_id ?? row.chat_id,\n    message_id: cb.message_id,\n    event_id: cb.event_id ?? row.event_id,\n    action: cb.action\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        -16
+      ],
+      "id": "4700d00b-c014-41e2-9466-7adde5949b6a",
+      "name": "Restore meta + attach row"
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chat_id }}",
+        "messageId": "={{ $json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "={{ $json.text }}",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "ℹ️ Details",
+                    "additionalFields": {
+                      "callback_data": "={{ `ms:v1:details:${$json.event_id}` }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1744,
+        64
+      ],
+      "id": "cd7aa942-87c4-4ca5-b8bc-0f5388db8733",
+      "name": "Edit Message Text1",
+      "webhookId": "e0fcac80-754e-4769-8fa4-cfc7f59825ea",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "94c78e5f-efe7-42c3-8820-eb5f1a76a2c9",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "details",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        -16
+      ],
+      "id": "7085794e-a2d7-4419-9cd8-c62f48d5b3c9",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = Array.isArray($json) ? $json[0] : $json;\n\nconst esc = (s) =>\n  String(s ?? \"\")\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n\nconst cat = row?.category ?? \"UNKNOWN\";\nconst pr = row?.priority ?? \"?\";\n\nconst confNum =\n  typeof row?.confidence === \"number\"\n    ? row.confidence\n    : (row?.confidence != null ? Number(row.confidence) : null);\n\nconst confTxt = Number.isFinite(confNum) ? `${(confNum * 100).toFixed(0)}%` : \"—\";\n\nconst next = row?.suggested_action ? String(row.suggested_action) : \"\";\n\nconst lines = [];\nlines.push(`🧠 <b>${esc(cat)}</b>`);\nlines.push(`<b>Priority:</b> P${esc(pr)}   <b>Confidence:</b> ${esc(confTxt)}`);\nif (next) lines.push(`<b>Next:</b> ${esc(next)}`);\n\nreturn [{\n  json: {\n    ok: true,\n    chat_id: $json.chat_id,\n    message_id: $json.message_id,\n    event_id: $json.event_id,\n    parse_mode: \"HTML\",\n    text: lines.join(\"\\n\"),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        64
+      ],
+      "id": "fdbcf58e-883a-4e63-9e03-51cf22a5b909",
+      "name": "Build back text"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Parse + Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse + Normalize": {
+      "main": [
+        [
+          {
+            "node": "IF: ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: ok?": {
+      "main": [
+        [
+          {
+            "node": "Answer Query a callback",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Stash callback meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Answer Callback Query (ошибка)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Query a callback": {
+      "main": [
+        []
+      ]
+    },
+    "Postgres: Load intel_event": {
+      "main": [
+        [
+          {
+            "node": "Restore meta + attach row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build details text": {
+      "main": [
+        [
+          {
+            "node": "Edit Message Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stash callback meta": {
+      "main": [
+        [
+          {
+            "node": "Postgres: Load intel_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore meta + attach row": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Build details text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build back text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build back text": {
+      "main": [
+        [
+          {
+            "node": "Edit Message Text1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "f8ec3c92-a8ae-4d6a-97f3-6845f568cbfe",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "iggfosJhUEd1u7j9V5Tio",
+  "tags": []
+}

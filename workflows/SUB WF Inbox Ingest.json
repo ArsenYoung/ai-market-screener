@@ -1,0 +1,861 @@
+{
+  "name": "SUB WF Inbox Ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "71ee7965-6582-40af-8930-46c902fce4ca",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const required = [\"chat_id\",\"user_id\",\"message_id\",\"trace_id\",\"kb_ref\"];\nconst missing = required.filter(k => !$json[k]);\n\nif (missing.length) {\n  return [{ json: { ok:false, reply_text:`ERR missing: ${missing.join(\", \")}`, parse_mode:\"HTML\" } }];\n}\n\nconst text = String($json.text ?? '').trim();\nif (!text) {\n  return [{ json: { ok:false, reply_text:`ERR empty text (trace_id=${$json.trace_id})`, parse_mode:\"HTML\" } }];\n}\n\nreturn [{ json: { ...$json, text } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "0ac1c058-3f15-4ab0-a7d8-ca14413e6927",
+      "name": "Validate input"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = String($json.text || '').trim();\n\nif (!text) {\n  return [{\n    json: {\n      ok: true,\n      reply_text: \"Send the post text (copy/paste). Use /help for examples.\",\n      parse_mode: \"HTML\",\n    }\n  }];\n}\n\n// link-only: один токен и это URL\nconst tokens = text.split(/\\s+/).filter(Boolean);\nconst isUrl = (s) => /^https?:\\/\\/\\S+$/i.test(s);\n\nif (tokens.length === 1 && isUrl(tokens[0])) {\n  return [{\n    json: {\n      ok: true,\n      reply_text:\n`🚫 <b>Link-only message</b>\\nScraping is disabled in this demo.\\n\\nPlease send the <b>post text</b> (copy/paste) or use /demo.`,\n      parse_mode: \"HTML\",\n    }\n  }];\n}\n\nreturn [{ json: { ...$json, is_ingest: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "63f3c50f-4740-4cf9-a19b-918b16b0ef8d",
+      "name": "Detect link-only / empty"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cbb08f04-cad7-460b-979d-2d367b5edb0c",
+              "leftValue": "={{$json.is_ingest}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        624,
+        0
+      ],
+      "id": "5a8dcbd6-6977-4461-8563-411f4db6e5ad",
+      "name": "IF is_ingest?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reply_text =\n  $json.reply_text ||\n  \"Send the post text (copy/paste). Use /help for examples.\";\n\nreturn [{\n  json: {\n    ok: $json.ok ?? true,\n    reply_text,\n    parse_mode: $json.parse_mode || \"HTML\",\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        304
+      ],
+      "id": "02d86500-e325-4731-a621-214603b3b9c5",
+      "name": "Return early"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize + hash\n// Задача: подготовить стабильный content_hash для дедупа и данные для следующих шагов.\n// ВАЖНО: text = полный текст (не режем). Ограничение делаем только для text_for_llm.\n\nconst crypto = require(\"crypto\");\n\nfunction collapseSpaces(s) {\n  return String(s || \"\").replace(/\\s+/g, \" \").trim();\n}\n\nfunction stripTrackingParams(urlStr) {\n  const raw = String(urlStr || \"\").trim();\n  if (!raw) return \"\";\n\n  try {\n    const u = new URL(raw);\n\n    const drop = [\n      \"utm_source\", \"utm_medium\", \"utm_campaign\", \"utm_term\", \"utm_content\",\n      \"ref\", \"ref_src\",\n      \"fbclid\", \"gclid\", \"igshid\",\n      \"mc_cid\", \"mc_eid\",\n    ];\n\n    drop.forEach((p) => u.searchParams.delete(p));\n\n    // ВАЖНО: не выкидываем hash для X, т.к. у тебя демо-якорь \"#demo-10\" — это идентификатор.\n    // Если хочешь всё-таки убрать hash в проде — делай это условно, например только если hash начинается с \"#utm\" и т.п.\n    // u.hash = \"\";\n\n    return u.toString();\n  } catch {\n    return raw;\n  }\n}\n\nfunction extractUrls(text) {\n  const re = /\\bhttps?:\\/\\/[^\\s<>()\"]+/gi;\n  const found = String(text || \"\").match(re) || [];\n  return found.map((u) => u.replace(/[.,!?;:)\\]]+$/g, \"\"));\n}\n\nfunction uniq(arr) {\n  const seen = new Set();\n  const out = [];\n  for (const x of arr) {\n    const v = String(x || \"\").trim();\n    if (!v) continue;\n    const k = v.toLowerCase();\n    if (seen.has(k)) continue;\n    seen.add(k);\n    out.push(v);\n  }\n  return out;\n}\n\n// 0) Берём исходный текст\nconst original = String($json.text ?? \"\").trim();\n\n// 1) Минимальная зачистка: CRLF -> LF, trim\nconst text = original.replace(/\\r\\n/g, \"\\n\").trim();\n\n// 2) Собираем URL из 3 источников: входной url_list, source_url, и из текста\nconst inputUrlList = Array.isArray($json.url_list) ? $json.url_list : [];\nconst inputSourceUrl = String($json.source_url ?? \"\").trim();\nconst urlsFromText = extractUrls(text);\n\nconst allUrlsRaw = [\n  ...inputUrlList,\n  ...(inputSourceUrl ? [inputSourceUrl] : []),\n  ...urlsFromText,\n];\n\n// 3) Чистим URL (без трекинга), дедуп\nconst cleanedUrls = allUrlsRaw.map(stripTrackingParams).filter(Boolean);\nconst url_list = uniq(cleanedUrls);\n\n// 4) canonical для хэша:\n// - заменяем URL в тексте на очищенные (только те, что реально встретились в тексте)\n// - схлопываем пробелы, lower-case\nlet canonical = text;\nfor (let i = 0; i < urlsFromText.length; i++) {\n  const rawUrl = urlsFromText[i];\n  const cleanUrl = stripTrackingParams(rawUrl);\n  if (!cleanUrl) continue;\n  canonical = canonical.split(rawUrl).join(cleanUrl);\n}\ncanonical = collapseSpaces(canonical).toLowerCase();\n\n// 5) SHA-256 хэш для дедупа\nconst content_hash = crypto\n  .createHash(\"sha256\")\n  .update(canonical, \"utf8\")\n  .digest(\"hex\");\n\n// 6) Отдельно готовим текст для LLM (можно лимитировать)\nconst maxLen = 8000;\nlet text_for_llm = text;\nlet llm_truncated = false;\n\nif (text_for_llm.length > maxLen) {\n  text_for_llm = text_for_llm.slice(0, maxLen);\n  llm_truncated = true;\n}\n\n// Primary URL for dedup by link: prefer source_url, else first url_list\nconst primaryUrl =\n  (inputSourceUrl && inputSourceUrl.trim()) ? inputSourceUrl.trim()\n  : (Array.isArray(url_list) && url_list[0]) ? String(url_list[0]).trim()\n  : \"\";\n\n// IMPORTANT: must be NULL when absent (not empty string)\nconst source_url_canonical = primaryUrl ? stripTrackingParams(primaryUrl) : null;\n\nreturn [\n  {\n    json: {\n      ...$json,\n\n      // FULL TEXT\n      text,\n\n      // For dedup by content\n      canonical_text: canonical,\n      content_hash,\n\n      // URLs\n      url_list,\n\n      // keep normalized source_url for UI\n      source_url: inputSourceUrl ? stripTrackingParams(inputSourceUrl) : ($json.source_url ?? \"\"),\n\n      // NEW: canonical URL for unique index / dedup by link\n      source_url_canonical,\n\n      // For LLM\n      text_for_llm,\n      llm_truncated,\n\n      // Meta\n      text_len: text.length,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        -96
+      ],
+      "id": "59f37b79-a2a5-4bfb-871c-cb0daad1716e",
+      "name": "Normalize + hash"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.intel_events (\n  kb_ref,\n  source,\n  chat_id,\n  user_id,\n  message_id,\n  content_hash,\n  source_url_canonical,\n  text,\n  payload,\n  ts,\n  last_seen_at,\n  status\n)\nvalues (\n  $1, $2, $3, $4, $5,\n  $6, $7, $8, $9::jsonb,\n  now(), now(), 'new'\n)\non conflict (chat_id, content_hash)\ndo update set\n  last_seen_at = now(),\n  message_id = excluded.message_id,\n  payload = excluded.payload\nreturning event_id, status, last_seen_at, (xmax = 0) as was_inserted;;",
+        "options": {
+          "queryReplacement": "={{[\n  $json.kb_ref,                 // $1\n  $json.source,                 // $2\n  $json.chat_id,                // $3\n  $json.user_id,                // $4\n  $json.message_id,             // $5\n  $json.content_hash,           // $6\n  $json.source_url_canonical,   // $7  (NULL если нет)\n  $json.text,                   // $8\n  JSON.stringify({              // $9 payload\n    canonical_text: $json.canonical_text,\n    url_list: $json.url_list || [],\n    source_url: $json.source_url || \"\",\n    source_url_canonical: $json.source_url_canonical || null,\n    text_for_llm: $json.text_for_llm,\n    llm_truncated: $json.llm_truncated,\n    text_len: $json.text_len,\n    trace_id: $json.trace_id,\n    author: $json.author || \"\",\n    kb_ref: $json.kb_ref,\n    source: $json.source\n  })\n]}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        -96
+      ],
+      "id": "94fb1332-2d5f-422b-b76b-878d1cf90f12",
+      "name": "Upsert intel_events",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c69fe3b3-c0b5-4569-9a72-a3fdce6e00a4",
+              "leftValue": "={{ $json.was_inserted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1248,
+        -96
+      ],
+      "id": "26e2e1c5-1b0b-4c68-a218-119bec53d966",
+      "name": "IF inserted?"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  ok: true,\n  suppress_reply: false,\n  chat_id: $json.chat_id,\n  event_id: $json.event_id,\n  reply_text: $json.reply_text,\n  parse_mode: $json.parse_mode || \"HTML\",\n  reply_markup: {\n  inline_keyboard: [\n    [{ text: \"ℹ️ Details\", callback_data: `ms:v1:details:${$json.event_id}` }]\n  ]\n}\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        -352
+      ],
+      "id": "075be885-72cd-47df-bb88-cf7074df3aa4",
+      "name": "Return accepted"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ok: true,\n    reply_text: `🟡 Duplicate.`,\n    parse_mode: \"HTML\",\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        128
+      ],
+      "id": "2acf2792-bca6-44b6-b11c-07c01a456e45",
+      "name": "Return duplicate"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "M8iBfMfxQ9xt2gbfGW4D3",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/M8iBfMfxQ9xt2gbfGW4D3",
+          "cachedResultName": "SUB WF Process New Event"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1472,
+        -288
+      ],
+      "id": "623fac08-685f-4ff1-aea7-36b58651cdcb",
+      "name": "Call SUB WF Process New Event"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29424cfb-850b-4d16-b0a9-8d3221a3dba1",
+              "leftValue": "={{$json.suppress_reply}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        112
+      ],
+      "id": "53fb5b7f-963a-4913-9be1-2e14c761268c",
+      "name": "IF suppress_reply"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29424cfb-850b-4d16-b0a9-8d3221a3dba1",
+              "leftValue": "={{ $('Normalize + hash').item.json.suppress_reply }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        16
+      ],
+      "id": "5d692617-d5a4-41fb-ba68-962627f0ff71",
+      "name": "IF suppress_reply1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29424cfb-850b-4d16-b0a9-8d3221a3dba1",
+              "leftValue": "={{$json.suppress_reply}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2016,
+        -288
+      ],
+      "id": "159f429c-f648-4e0f-94a6-87ac8170cbd2",
+      "name": "IF suppress_reply2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  event_id,\n  chat_id,\n  category,\n  priority,\n  confidence,\n  suggested_action,\n  status\nfrom public.intel_events\nwhere event_id = $1::uuid\nlimit 1;\n",
+        "options": {
+          "queryReplacement": "={{ $json.event_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1648,
+        -288
+      ],
+      "id": "1fd056dc-970d-4605-b154-e2a86592259f",
+      "name": "Postgres: Load intel_event",
+      "credentials": {
+        "postgres": {
+          "id": "czgsE54MCFOUOVR9",
+          "name": "Market Screener DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = Array.isArray($json) ? $json[0] : $json;\n\nconst esc = (s) =>\n  String(s ?? \"\")\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n\nconst catRaw = row.category || \"UNKNOWN\";\nconst pr = row.priority ?? \"?\";\nconst confNum =\n  typeof row.confidence === \"number\"\n    ? row.confidence\n    : (row.confidence !== null && row.confidence !== undefined ? Number(row.confidence) : null);\n\nconst confTxt = (Number.isFinite(confNum)) ? `${(confNum * 100).toFixed(0)}%` : \"—\";\n\nconst catLabel =\n  catRaw === \"RISK_FUD\" ? \"⚠️ RISK\" :\n  catRaw === \"NOISE\" ? \"🫧 NOISE\" :\n  catRaw === \"SIGNAL\" ? \"📈 SIGNAL\" :\n  `ℹ️ ${catRaw}`;\n\nconst next = row.suggested_action ? esc(row.suggested_action) : \"\";\n\nlet text = `<b>${esc(catLabel)}</b>\\n` +\n           `<b>Priority:</b> P${esc(pr)}   <b>Confidence:</b> ${esc(confTxt)}`;\n\nif (next) {\n  text += `\\n<b>Next:</b> ${next}`;\n}\n\nreturn [{\n  ok: true,\n  suppress_reply: false,\n  chat_id: row.chat_id,\n  event_id: row.event_id,\n  parse_mode: \"HTML\",\n  reply_text: text\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        -288
+      ],
+      "id": "270af614-953d-45ea-be81-0d0c3c07b31b",
+      "name": "Build card text"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "=ℹ️ Details",
+                    "additionalFields": {
+                      "callback_data": "={{ `ms:v1:details:${$json.event_id}` }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "={{$json.parse_mode || null}}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        -352
+      ],
+      "id": "fe8b059e-01ba-4125-8d41-eb6bc886ae55",
+      "name": "Send a text message INLINE",
+      "webhookId": "1302a5be-10d3-46ca-9b42-2072360e8774",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Validate input').item.json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "={{$json.parse_mode || null}}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2112,
+        -48
+      ],
+      "id": "7ecb2a5a-dedb-4f19-b513-72260907acc9",
+      "name": "Send a text message",
+      "webhookId": "1302a5be-10d3-46ca-9b42-2072360e8774",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f2eb5db-6964-4c3c-82e5-cdaba8ea5d7e",
+              "leftValue": "={{ !($('Validate input').item.json.silent === true) && !($json.suppress_reply === true) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1696,
+        32
+      ],
+      "id": "699fabd4-df04-4d29-8a05-3220c7672274",
+      "name": "IF silent?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f2eb5db-6964-4c3c-82e5-cdaba8ea5d7e",
+              "leftValue": "={{ !($('Validate input').item.json.silent === true) && !($json.suppress_reply === true) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2240,
+        -272
+      ],
+      "id": "46930188-94e0-4632-a927-f8d16a164c9f",
+      "name": "IF silent?1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  ok: true,\n  suppress_reply: false,\n  chat_id: $json.chat_id,\n  event_id: $json.event_id,\n  reply_text: $json.reply_text,\n  parse_mode: $json.parse_mode || \"HTML\",\n  reply_markup: {\n  inline_keyboard: [\n    [{ text: \"ℹ️ Details\", callback_data: `ms:v1:details:${$json.event_id}` }]\n  ]\n}\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        -176
+      ],
+      "id": "4400a865-0e32-48e0-a04d-b2c44922d900",
+      "name": "Return accepted1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ok: true,\n    reply_text: `🟡 Duplicate.`,\n    parse_mode: \"HTML\",\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -48
+      ],
+      "id": "e89e3db4-fe07-4832-bc42-3248e9eb7430",
+      "name": "Return duplicate1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f2eb5db-6964-4c3c-82e5-cdaba8ea5d7e",
+              "leftValue": "={{ !($('Validate input').item.json.silent === true) && !($json.suppress_reply === true) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1056,
+        192
+      ],
+      "id": "753595b0-e833-490a-84c7-d70206c26ab7",
+      "name": "IF silent?2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reply_text =\n  $json.reply_text ||\n  \"Send the post text (copy/paste). Use /help for examples.\";\n\nreturn [{\n  json: {\n    ok: $json.ok ?? true,\n    reply_text,\n    parse_mode: $json.parse_mode || \"HTML\",\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        160
+      ],
+      "id": "ec9b0ab8-b7df-4c67-9e2d-6248cde3e837",
+      "name": "Return early1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Validate input').item.json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "={{$json.parse_mode || null}}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1504,
+        160
+      ],
+      "id": "0a8a38cf-cf65-4da7-b102-ab5895015669",
+      "name": "Send a text message1",
+      "webhookId": "1302a5be-10d3-46ca-9b42-2072360e8774",
+      "credentials": {
+        "telegramApi": {
+          "id": "mtbdLa5P1jJ6m2XZ",
+          "name": "MarketScreenerBot"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Detect link-only / empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect link-only / empty": {
+      "main": [
+        [
+          {
+            "node": "IF is_ingest?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF is_ingest?": {
+      "main": [
+        [
+          {
+            "node": "Normalize + hash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF suppress_reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize + hash": {
+      "main": [
+        [
+          {
+            "node": "Upsert intel_events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert intel_events": {
+      "main": [
+        [
+          {
+            "node": "IF inserted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF inserted?": {
+      "main": [
+        [
+          {
+            "node": "Call SUB WF Process New Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF suppress_reply1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return accepted": {
+      "main": [
+        [
+          {
+            "node": "Send a text message INLINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call SUB WF Process New Event": {
+      "main": [
+        [
+          {
+            "node": "Postgres: Load intel_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF suppress_reply": {
+      "main": [
+        [],
+        [
+          {
+            "node": "IF silent?2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF suppress_reply1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "IF silent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF suppress_reply2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "IF silent?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres: Load intel_event": {
+      "main": [
+        [
+          {
+            "node": "Build card text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build card text": {
+      "main": [
+        [
+          {
+            "node": "IF suppress_reply2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return duplicate": {
+      "main": [
+        []
+      ]
+    },
+    "Return early": {
+      "main": [
+        []
+      ]
+    },
+    "IF silent?": {
+      "main": [
+        [
+          {
+            "node": "Return duplicate1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF silent?1": {
+      "main": [
+        [
+          {
+            "node": "Return accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return accepted1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return duplicate1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF silent?2": {
+      "main": [
+        [
+          {
+            "node": "Return early1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return early",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return early1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "a4e79ec8-ddf3-485d-9aea-e05d5f906367",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c6d12de685a5982c0909d3ed1470b369648fca6c63e6a68b69f7297e29a8de4d"
+  },
+  "id": "WV0FSDYwRyY9WHMz2f2F4",
+  "tags": []
+}
